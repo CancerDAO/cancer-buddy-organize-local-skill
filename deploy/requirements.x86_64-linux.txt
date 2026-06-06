@@ -1,0 +1,48 @@
+# Layer-1 OCR stack for x86_64 Linux CPU servers (Issue #1).
+#
+# ROOT CAUSE (verified on real x86, OpenCloudOS 9 / Xeon no-avx512):
+#   The oneDNN crash `ConvertPirAttribute2RuntimeAttribute ... onednn_instruction.cc`
+#   was NEVER a version problem — it reproduces on the reporter's own versions
+#   (paddlepaddle 3.3.1 + paddleocr 3.6.0) and is NOT fixed by any env flag.
+#   The fix is a CODE change: PaddleOCR(enable_mkldnn=False) in redact_ocr.py.
+#   See smoke_test.py — these exact pins pass ocr_predict.ok==true with that fix.
+#
+# TWO SYSTEM PREREQS (not pip — install via OS package manager FIRST):
+#   Debian/Ubuntu: apt-get install -y libgl1 libglib2.0-0 libgomp1
+#   RHEL/OpenCloudOS/CentOS: dnf install -y mesa-libGL glib2 libgomp
+#   (cv2/paddlex needs libGL.so.1; a bare server lacks it → ImportError.)
+#
+# VERIFY: python scripts/smoke_test.py   →  "ocr_predict": {"ok": true}
+
+# --- OCR core (reporter's own versions; verified working with enable_mkldnn=False) ---
+paddlepaddle==3.3.1
+paddleocr==3.6.0
+numpy<2          # paddleocr 3.6.0 pulls numpy<2; pinned for reproducibility
+
+# --- extraction / IO ---
+Pillow>=10.0.0
+PyMuPDF>=1.23.0
+python-docx>=1.0.0
+openpyxl>=3.1.0
+
+# --- workflow deps (shared with mtb-core) ---
+openai>=1.55.0
+python-dotenv==1.0.1
+loguru==0.7.2
+Jinja2==3.1.4
+pydantic==2.9.2
+requests==2.32.3
+PyYAML>=6.0
+lxml>=4.9.0
+typing-extensions==4.12.2
+
+# --- optional archive support ---
+rarfile
+py7zr
+
+# --- OPTIONAL: PaddleNLP name-NER (NOT installed here) ---
+# Default pipeline does not need it (regex floor covers ID/phone/labeled PII).
+# It conflicts with paddleocr on numpy and pulls a broken aistudio-sdk by default.
+# If you want free-floating-name NER, use a SEPARATE venv:
+#   paddlenlp==2.8.1
+#   aistudio-sdk==0.2.6   # the version that still exposes aistudio_sdk.hub.download

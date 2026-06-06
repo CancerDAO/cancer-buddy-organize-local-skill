@@ -17,9 +17,24 @@ Debug mode (--debug):
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Defensive runtime env — set BEFORE any lazy `import paddle` below.
+# NOTE: the x86_64 Linux oneDNN crash
+#   (Unimplemented) ConvertPirAttribute2RuntimeAttribute ... (onednn_instruction.cc)
+# is NOT fixed by env flags — verified on real x86 (paddlepaddle 3.3.1 + paddleocr
+# 3.6.0) that neither FLAGS_use_mkldnn=0 nor FLAGS_enable_pir_in_executor=0 /
+# FLAGS_enable_pir_api=0 prevent it. The actual fix is passing
+# `enable_mkldnn=False` to the PaddleOCR constructor (see _build_ocr_instance),
+# which disables oneDNN at the inference-config layer the env flags don't reach.
+# FLAGS_use_mkldnn=0 is kept as a harmless belt-and-suspenders default.
+# ---------------------------------------------------------------------------
+os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
 # ---------------------------------------------------------------------------
 # PII detection — regex-first, NER only for names
@@ -79,10 +94,11 @@ def _classify_by_patterns(text: str) -> tuple[str | None, float | None]:
 
 _ner_engine = None
 _ner_available = None  # None = not checked, True/False = result
+_ner_error = None      # captured reason when NER is unavailable (surfaced in JSON)
 
 
 def _init_ner_engine():
-    global _ner_engine, _ner_available
+    global _ner_engine, _ner_available, _ner_error
     if _ner_available is False:
         return None
     if _ner_engine is not None:
@@ -96,8 +112,14 @@ def _init_ner_engine():
         )
         _ner_available = True
         return _ner_engine
-    except Exception:
+    except Exception as e:
+        # Common on x86_64 Linux: paddlenlp 2.8.x expects aistudio_sdk.hub.download
+        # which newer aistudio-sdk removed → ImportError. NER then silently
+        # degrades to regex-only, which MISSES free-floating names (no label).
+        # We capture the reason so the caller can raise a review_flag instead of
+        # shipping a silent privacy downgrade.
         _ner_available = False
+        _ner_error = f"{type(e).__name__}: {e}"
         return None
 
 # ---------------------------------------------------------------------------
@@ -145,8 +167,13 @@ def classify_line(text: str) -> tuple[str, str | None, float | None]:
     return ("keep", None, None)
 
 
-def _run_ner_batch(lines_classified: list):
-    """Regex-first, then NER for names only."""
+def _run_ner_batch(lines_classified: list, run_ner: bool = True):
+    """
+    Phase 1 (regex) ALWAYS runs — it is dependency-free and is the local
+    redaction floor. Phase 2 (PaddleNLP NER for free-floating names) only
+    runs when run_ner is True. `--no-ner` sets run_ner=False but STILL applies
+    the regex floor (matches the documented contract in paddleocr-integration.md).
+    """
     # Phase 1: regex — instant
     ner_candidates = []
     for i, item in enumerate(lines_classified):
@@ -157,6 +184,9 @@ def _run_ner_batch(lines_classified: list):
             item["label_ratio"] = label_ratio
         else:
             ner_candidates.append(i)
+
+    if not run_ner:
+        return
 
     # Phase 2: NER for remaining lines — only detect names
     engine = _init_ner_engine()
@@ -302,6 +332,9 @@ def _build_ocr_instance():
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 lang="ch",
+                enable_mkldnn=False,   # REQUIRED on x86_64 Linux: prevents the
+                                       # oneDNN PIR crash (onednn_instruction.cc).
+                                       # No-op cost on Apple Silicon (mkldnn off there).
             )
             if not hasattr(ocr, 'predict'):
                 raise AttributeError("PaddleOCR instance has no 'predict' method, not v3")
@@ -313,7 +346,7 @@ def _build_ocr_instance():
 
     # Fallback: v2
     from paddleocr import PaddleOCR
-    ocr = PaddleOCR(use_angle_cls=True, lang="ch")
+    ocr = PaddleOCR(use_angle_cls=True, lang="ch", enable_mkldnn=False)
     _ocr_version = "v2"
     return ocr, "v2"
 
@@ -575,8 +608,8 @@ def redact_image_ocr(
             "pii_type": None,
             "label_ratio": None,
         })
-    if not no_ner:
-        _run_ner_batch(lines_classified)
+    # Regex floor always runs; NER (names) skipped when no_ner=True.
+    _run_ner_batch(lines_classified, run_ner=not no_ner)
 
     # 3.5) Label-only → value propagation (横向)
     _propagate_label_to_value(lines_classified)
@@ -655,6 +688,11 @@ def redact_image_ocr(
         "regions": pii_regions,
         "ocr_text_full": ocr_text_full,
         "ocr_text_safe": ocr_text_safe,
+        # NER status — lets the orchestrator detect a silent name-redaction
+        # downgrade (e.g. paddlenlp/aistudio-sdk broken on x86) and raise a flag.
+        "ner_requested": not no_ner,
+        "ner_available": bool(_ner_available) if not no_ner else None,
+        "ner_error": _ner_error if (not no_ner and not _ner_available) else None,
     }
     if debug and debug_path:
         result["debug_image"] = debug_path
@@ -678,7 +716,8 @@ def main():
     parser.add_argument("--confidence", type=float, default=0.5,
                         help="OCR confidence threshold (default: 0.5)")
     parser.add_argument("--no-ner", action="store_true",
-                        help="Skip NER classification; all lines kept (debug/fallback)")
+                        help="Skip PaddleNLP name-NER (no paddlenlp needed). "
+                             "Regex PII floor (ID/phone/labeled fields) STILL applies.")
     args = parser.parse_args()
 
     input_path = Path(args.input).expanduser().resolve()

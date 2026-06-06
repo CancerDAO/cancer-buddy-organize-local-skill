@@ -18,7 +18,7 @@
 
 | | 默认 `cancer-buddy-organize` | **本仓 `cancer-buddy-organize-local`** |
 |---|---|---|
-| OCR 引擎 | Claude vision（云端 multimodal） | **本地 PaddleOCR + PaddleNLP NER** |
+| OCR 引擎 | Claude vision（云端 multimodal） | **本地 PaddleOCR + regex PII 兜底**（PaddleNLP NER 可选增强） |
 | 字符精度 | 黑盒，无校正记录 | **显式校正记录**，每个修改可追溯到 OCR 原始输出 |
 | PII 脱敏 | regex 提示 + 模型自觉 | **双层**：NER 图层遮挡 + 二次复查 |
 | 部署要求 | Claude Code 即可 | + Python ≥ 3.10 venv + PaddleOCR + PaddlePaddle |
@@ -48,13 +48,21 @@
 npx skills add CancerDAO/cancer-buddy-organize-local-skill -g
 
 # 2. 装 PaddleOCR Python venv（一次性，约 5-10 分钟）
-# 详见 INSTALL.md
 python3 -m venv ~/.venvs/mtb-ocr
-~/.venvs/mtb-ocr/bin/pip install paddlepaddle paddleocr paddlenlp
 
-# 3. 验证
-~/.venvs/mtb-ocr/bin/python -c "import paddleocr; print('OK')"
+#   Mac (Apple Silicon / Intel)：
+~/.venvs/mtb-ocr/bin/pip install paddlepaddle paddleocr
+
+#   x86_64 Linux 服务器：先装系统库 libGL（apt: libgl1 / dnf: mesa-libGL），再装锁定版本
+#   （x86 oneDNN 崩溃由 redact_ocr.py 的 enable_mkldnn=False 解决，详见 INSTALL.md §2.2）
+~/.venvs/mtb-ocr/bin/pip install -r deploy/requirements.x86_64-linux.txt
+#   或用 Docker 复现部署： docker build -f deploy/Dockerfile -t cbol-ocr . && docker run --rm cbol-ocr
+
+# 3. 验证（ocr_predict.ok 必须 true；paddlenlp NER 可选，默认不需要）
+~/.venvs/mtb-ocr/bin/python skills/cancer-buddy-organize-local/scripts/smoke_test.py
 ```
+
+> **Runtime**：worker prompt 已 runtime-agnostic，Claude Code 与 Codex/GPT 均可跑。**隐私默认 fail-safe**：本地 OCR 失败时**不会**把原图发给云模型（`--allow-cloud-vision` 才开），服务器部署务必保持默认。详见 [INSTALL.md](INSTALL.md) §4。
 
 主仓 `cancer-buddy-skill` 是建议但**非强制**前置依赖——本仓 vendor 了所需的 `references/patient-profile-schema.md` / `safety-guardrails.md` / `roles.md` / `terminology.md` / `profile-card.md`，单独安装也能跑。但若要用下游 `cancer-buddy-vault` / `cancer-buddy-find-care` 等子技能，仍需 [cancer-buddy-skill](https://github.com/CancerDAO/cancer-buddy-skill) 主仓。
 
@@ -150,7 +158,7 @@ $HOME/CancerDAO/patients/
 ## 注意事项
 
 - 本工具不提供医疗诊断或治疗建议——所有医疗决策需与专业医生确认
-- PaddleOCR 中文模型对手写 / 印章 / 严重模糊文档准确率有限，本 skill 在这些场景会自动 fallback 到 Claude vision（你可以通过 paddleocr-integration.md 调整阈值）
+- PaddleOCR 中文模型对手写 / 印章 / 严重模糊文档准确率有限。这些场景 OCR 失败时，默认（`deny`）记 gap、文件进未分类、**不上云**；仅 `--allow-cloud-vision` 才 fallback 到当前 runtime 的多模态 vision（详见 paddleocr-integration.md）
 - 字符校正只能改 OCR 错字，**禁止**做语义改写
 - 10_原始文件/原始未遮挡/ 是字节级镜像——永远本地 only，不要 commit 到任何 git 仓
 

@@ -48,6 +48,19 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 - `input_path` (必填)：folder / .zip / .rar / .7z / .tar.gz / .pdf / .docx 绝对路径
 - `--alias <name>` (可选)：覆盖默认 `PT-<hex>` patient_code（例 `--alias 程女士-2026`）。**v2.1 警告**：`--alias` 包含真名时调用方必须主动告知用户："patient_code 会出现在所有路径 / 下游报告 / 文件系统 — 用真名意味着 PII 直接暴露在文件系统层"。生产数据建议一律 `PT-<hex>`，仅 demo / 教学 / 单人本地审阅场景才用真名 alias。
 - `--merge-into <patient_code>` (可选, 显式触发 Layer 3.5)：把 input 内容作为补充材料 merge 进已有 patient_dir
+- `--allow-cloud-vision` (可选)：本地 PaddleOCR 失败时，允许 fallback 到当前 runtime 的多模态 vision 读原图。**默认关闭（fail-safe）**——默认行为是 OCR 失败即记 gap、文件进 `未分类/`、**绝不上云**。仅在单人本地审阅、且操作者明确接受"原始病历会发给模型 provider（Claude Code→Anthropic / Codex→OpenAI）"时才开。服务器 / 隐私优先部署**永不**开此 flag。
+
+## Supported runtimes
+
+本 skill 的 worker prompt 已 runtime-agnostic（见 [`references/organizer-prompt.md`](references/organizer-prompt.md) §Runtime adaptation）。已验证：
+
+| Runtime | 状态 | 备注 |
+|---|---|---|
+| Claude Code | ✅ 原生 | 派发 general-purpose subagent |
+| Codex / GPT-5.5 | ✅ 已验证 | orchestrator 直接跑 prompt，无 subagent 时顺序处理；shell + 文件读写即可 |
+| 其他 agentic shell | ⚠️ 应可用 | 只需 shell + 文件读写；并行子任务可选 |
+
+**隐私默认**：所有 runtime 上 `--allow-cloud-vision` 默认关闭。本地 OCR 失败绝不静默把原图发给云模型——这是本 skill「本地脱敏」前提的硬约束。
 
 ## Outputs
 
@@ -76,13 +89,14 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
    - 文件名匹配 `*timeline*.txt` / `*整理*.txt` / `*manual*` → Layer 3.5 模式
    - 否则 Layer 1-3 全 pipeline 模式
 3. 检测 PaddleOCR 可用性（见 [`references/paddleocr-integration.md`](references/paddleocr-integration.md) §自检命令）：
-   - `~/.venvs/mtb-ocr/bin/python -c "import paddleocr"` 不通过 → 提示用户安装 OR 走 v1 兼容降级
-4. 解析 `patient_data_root`：`$CANCER_BUDDY_PATIENTS_DIR` → `$VMTB_PATIENT_DATA_ROOT` → `$HOME/CancerDAO/patients`
-5. 生成 / 解析 `patient_code`：默认 `PT-<10 位 hex from SHA256(basename + mtime)>`，`--alias` 时用 alias，碰撞时追加 `_2`/`_3`。**alias 含真名时**（启发式：包含 ASCII 大写名 + 小写姓 / 中文 2-4 字 / 完整生日年份等模式），dispatcher 必须先输出："`<alias>` 看起来含真实姓名 — 默认应使用 `PT-<hex>` 避免文件系统 PII 暴露；确认仍要用 alias 吗？" 等待显式确认才继续。
+   - `~/.venvs/mtb-ocr/bin/python -c "import paddleocr"` 不通过 → 提示用户安装（x86_64 Linux 见 [INSTALL.md](../../INSTALL.md) §Docker / pinned versions）。**不要**静默走云 vision。
+4. 解析 `cloud_vision_fallback`：默认 `deny`。仅当用户显式带 `--allow-cloud-vision` 才设 `allow`，且设前必须输出警告："本地 OCR 失败时将把原始病历图片发送给当前 runtime 的模型 provider（Claude Code→Anthropic / Codex→OpenAI）。服务器/隐私优先部署不应开此项。确认？" 等待显式确认。
+5. 解析 `patient_data_root`：`$CANCER_BUDDY_PATIENTS_DIR` → `$VMTB_PATIENT_DATA_ROOT` → `$HOME/CancerDAO/patients`
+6. 生成 / 解析 `patient_code`：默认 `PT-<10 位 hex from SHA256(basename + mtime)>`，`--alias` 时用 alias，碰撞时追加 `_2`/`_3`。**alias 含真名时**（启发式：包含 ASCII 大写名 + 小写姓 / 中文 2-4 字 / 完整生日年份等模式），dispatcher 必须先输出："`<alias>` 看起来含真实姓名 — 默认应使用 `PT-<hex>` 避免文件系统 PII 暴露；确认仍要用 alias 吗？" 等待显式确认才继续。
 
-### Step 1 — Dispatch organizer subagent
+### Step 1 — Dispatch organizer worker
 
-派发 `general-purpose` subagent，prompt = [`references/organizer-prompt.md`](references/organizer-prompt.md) 全文 + 末尾 append `## Call parameters`：
+**Claude Code**: 派发一个 `general-purpose` subagent。**Codex / GPT / 其他 agentic runtime**：orchestrator 直接执行该 prompt（无 subagent 时顺序处理即可——正确性不依赖并行）。两种情况下 worker prompt 都是 [`references/organizer-prompt.md`](references/organizer-prompt.md) 全文（已 runtime-agnostic）+ 末尾 append `## Call parameters`：
 
 ```
 - input_path: <absolute path>
@@ -90,6 +104,8 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 - patient_data_root: <resolved>
 - mode: <full | merge_only | default_upgrade>
 - paddle_python: <~/.venvs/mtb-ocr/bin/python or "fallback">
+- cloud_vision_fallback: <deny | allow>   # 默认 deny；服务器/隐私优先部署必须 deny（OCR 失败不上云）
+- runtime: <claude-code | codex-gpt-5.5 | ...>
 - skill_dir: <absolute path to this skill — Layer 1 scripts live in $skill_dir/scripts/. Typical install: ~/.claude/skills/cancer-buddy-organize-local>
 ```
 

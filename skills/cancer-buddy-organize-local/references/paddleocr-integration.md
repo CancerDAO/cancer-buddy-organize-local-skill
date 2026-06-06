@@ -6,14 +6,13 @@
 
 ### venv
 
-期望 `~/.venvs/mtb-ocr/`（已装 paddleocr 3.4 + paddlepaddle 3.3 + paddlex 3.4）。
+期望 `~/.venvs/mtb-ocr/`（已装 paddleocr + paddlepaddle）。
 
-补装 workflow deps（已在 SPEC 锁定，组件复用 mtb-core）：
-```bash
-~/.venvs/mtb-ocr/bin/pip install -q "openai>=1.55.0" "python-dotenv==1.0.1" \
-    "loguru==0.7.2" "PyMuPDF>=1.23.0" "Jinja2==3.1.4" "pydantic==2.9.2" \
-    "requests==2.32.3" "PyYAML>=6.0" "lxml>=4.9.0" "typing-extensions==4.12.2"
-```
+- **Apple Silicon / Intel Mac**：`pip install paddlepaddle paddleocr` 开箱即用。
+- **x86_64 Linux 服务器**：先装系统库（`libgl1`/`mesa-libGL` 等，cv2 依赖），再 `pip install -r deploy/requirements.x86_64-linux.txt`。x86 上的 oneDNN 崩溃由 `redact_ocr.py` 构造 PaddleOCR 时传 `enable_mkldnn=False` 解决（env flag 无效，已真机验证）。详见 [INSTALL.md §2.2](../../../INSTALL.md)。
+- **NER（paddlenlp）不装进此 venv**：与 paddleocr 3.x 在 numpy 上冲突，默认 pipeline 也用不到（见下 §Fallback + INSTALL §2.5）。
+
+workflow deps 已在 `deploy/requirements.x86_64-linux.txt` 锁定（组件复用 mtb-core）。
 
 ### 自检命令
 
@@ -76,7 +75,13 @@ Skill 自洽，**不**依赖 mtb-core 仓库路径。脚本是从 mtb-core vendo
 {"success": false, "error": "...", "regions": []}
 ```
 
-**重要**：`ocr_text_safe` 已是字符串，可直接喂 Layer 2。**禁止**让 Layer 2 重新 OCR 同一张图（除非 `--no-ner` 时漏检率 > 30%，详见 fallback 章节）。
+**重要**：`ocr_text_safe` 已是字符串，可直接喂 Layer 2。**禁止**让 Layer 2 重新 OCR 同一张图。
+
+输出额外含 NER 状态字段（用于检测静默隐私降级）：
+```json
+{"ner_requested": true, "ner_available": false, "ner_error": "ImportError: cannot import name 'download' ..."}
+```
+`ner_requested:true` 且 `ner_available:false` → organizer 加 review_flag `ner_unavailable_name_redaction_degraded`。注意 `--no-ner` 仍跑 **regex 兜底脱敏**（身份证/手机/带标签字段）——只跳过无标签人名 NER，不是"不脱敏"。
 
 ### PDF → 文本 (extract_pdf.py)
 
@@ -130,32 +135,25 @@ export FLAGS_use_mkldnn=0                            # macOS Apple Silicon 关�
 
 Layer 1 应在每次 subprocess 调用前都 prepend 这两个 env，**不要**依赖 shell rc。
 
-## Fallback — PaddleOCR 不可用时
+## Fallback — PaddleOCR 不可用时（隐私 fail-safe 默认）
 
-按下列顺序判断：
+由 `cloud_vision_fallback` 参数控制（默认 `deny`）。**`deny` 绝不把原图发给任何云多模态模型**（含本 runtime 自己的 vision —— 在 Codex/GPT 上 = OpenAI，在 Claude Code 上 = Anthropic，都让未脱敏原图离开本机）。
 
-1. **venv 不存在** (`$HOME/.venvs/mtb-ocr/bin/python` 不存在)
-   → 提示用户先 `python -m venv ~/.venvs/mtb-ocr && ~/.venvs/mtb-ocr/bin/pip install paddleocr paddlepaddle`，或：
-   → 直接走 v1 兼容路径（Claude vision 自己 OCR），写 `readiness.warnings += ["paddleocr_unavailable: venv 缺失"]`
+| 触发条件 | `deny`（默认） | `allow`（显式 opt-in） |
+|---|---|---|
+| venv 不存在 / `import paddleocr` 失败 | 提示装锁定版本（INSTALL §2.2），文本型文件继续，图片标 gap | 图片走本 runtime vision |
+| 单文件 OCR `success:false`/超时 | 该文件标 `ocr_gap_local_only` 进 `未分类/` + yellow flag | 该文件走 vision，sidecar 头标 `OCR_ENGINE: cloud_vision_fallback` |
+| 批量失败率 > 30% | 剩余图片整批标 gap，**不上云** | 整批走 vision |
+| 英文图片 | 标 gap（英文 PDF/docx 走文本提取不受影响） | 走 vision |
 
-2. **paddleocr import 失败** (`paddleocr 3.x` 检查失败)
-   → 同上 fallback
-
-3. **Layer 1 单文件 OCR 失败**（subprocess 返回 success: false 或超时）
-   → 该文件**跳过 Layer 1，进 Layer 2 直接 vision**
-   → 写 `readiness.warnings += ["paddle_ocr_failed: <basename>"]`
-   → sidecar 头标记 `OCR_ENGINE: claude_vision_fallback`
-
-4. **批量失败率 > 30%**（>30% 的图片 Layer 1 失败）
-   → 整批 abort Layer 1，全部走 Claude vision
-   → readiness.warnings 加 `paddleocr_bulk_failure_rate: 0.<X>, switched to vision-only`
+所有分支都写对应的 `readiness.warnings`（`paddleocr_unavailable` / `paddle_ocr_failed` / `paddleocr_bulk_failure_rate` / `english_doc_paddle_skip`）。`allow` 下每个上云文件额外加 `cloud_vision_used: <name> via <runtime>`。
 
 ## 英文文档处理
 
 PaddleOCR 默认中文模型对纯英文报告（如 NCCN 英文版 / 美国医院出院 summary）准确度 < 中文。处理规则：
 
 1. 文件名匹配 `[A-Za-z]{30,}` 或 OCR 头部 50 字非中文比例 > 70% → 标 `language: en`
-2. `language=en` 文件直接走 Claude vision（v1 兼容路径），不调 PaddleOCR
+2. `language=en` 的**图片**按 `cloud_vision_fallback` 策略处理（`deny` → 标 gap；`allow` → 多模态 vision），不调 PaddleOCR。英文 PDF/docx 走 extract_pdf/extract_docx 文本提取，不受影响
 3. 写 `readiness.warnings += ["english_doc_paddle_skip: <basename>"]`
 
 ## 调用示例（subagent 实际执行）
@@ -178,7 +176,7 @@ result = subprocess.run(
 )
 
 if result.returncode != 0:
-    # fallback to vision
+    # apply cloud_vision_fallback policy (deny → record gap; allow → vision)
     pass
 else:
     data = json.loads(result.stdout)
@@ -195,6 +193,6 @@ subagent 通过 Bash 工具直接运行这种 Python，**不要**让 Claude 自�
 
 ## 已知限制
 
-- PaddleOCR 对**手写**字识别极差（< 60% 准确率）— 强制走 Claude vision
+- PaddleOCR 对**手写**字识别极差（< 60% 准确率）— OCR 失败按 `cloud_vision_fallback` 策略处理（默认 `deny` 记 gap、不上云）
 - PaddleOCR 对**化验单中复杂表格**（多列对齐，含↑↓箭头）有 5-10% 错位率 — Layer 2 必须做字符校正补救
 - PaddleNLP NER 对**罕见姓名**漏检率较高 — Layer 2 必须做二次脱敏复查（OCR sidecar 模板里的 `## PII 二次脱敏追加` 区块就是这个用途）
