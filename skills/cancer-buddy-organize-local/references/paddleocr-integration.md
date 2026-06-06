@@ -55,7 +55,7 @@ Skill 自洽，**不**依赖 mtb-core 仓库路径。脚本是从 mtb-core vendo
     "$INPUT_IMAGE" \
     --output "$REDACTED_IMAGE" \
     --confidence 0.5 \
-    --no-ner   # 默认 --no-ner; 用纯 regex (paddlenlp 可选)
+    --no-ner   # 默认 --no-ner; 跳过 PaddleNLP NER，但 regex PII 检测（身份证/手机号/带标签姓名）仍然运行 (paddlenlp 可选)
 ```
 
 **stdout JSON**:
