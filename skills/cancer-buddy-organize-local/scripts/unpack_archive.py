@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Unpack archive files (.zip, .rar, .7z) and list medical document files."""
+"""Unpack archive files and list medical document files.
+
+Supported formats: .zip, .rar, .7z, .tar, .tar.gz/.tgz, .tar.bz2/.tbz2,
+.tar.xz/.txz. Tar variants use the stdlib tarfile module; .rar needs
+unrar/unar; .7z needs the system 7z (p7zip).
+"""
 
 import sys
 import os
@@ -7,6 +12,7 @@ import json
 import time
 import tempfile
 import zipfile
+import tarfile
 import shutil
 import subprocess
 from pathlib import Path
@@ -135,6 +141,57 @@ def unpack_7z(archive_path: str, output_dir: str) -> None:
         raise RuntimeError(f"7z extraction failed: {result.stderr}")
 
 
+def unpack_tar(archive_path: str, output_dir: str) -> None:
+    """Extract any tar variant (.tar/.tar.gz/.tgz/.tar.bz2/.tar.xz) safely.
+
+    Uses tarfile with transparent compression auto-detection ("r:*").
+    On Python >= 3.12 the "data" extraction filter rejects unsafe members
+    (path traversal, absolute paths, special files); on older Pythons we
+    guard manually by rejecting members whose resolved path escapes
+    output_dir.
+    """
+    output_root = os.path.realpath(output_dir)
+    with tarfile.open(archive_path, "r:*") as tf:
+        if hasattr(tarfile, "data_filter"):
+            # Python >= 3.12: built-in safe filter.
+            tf.extractall(output_dir, filter="data")
+        else:
+            # Older Python: manually reject members that escape output_dir.
+            for member in tf.getmembers():
+                target = os.path.realpath(os.path.join(output_dir, member.name))
+                if target != output_root and not target.startswith(output_root + os.sep):
+                    raise RuntimeError(
+                        f"Unsafe tar member (path traversal): {member.name}"
+                    )
+            tf.extractall(output_dir)
+
+
+def detect_format(archive_path: str) -> str:
+    """Detect archive format from the full lowercased filename.
+
+    Uses the full name (not just the last suffix) so multi-part extensions
+    like .tar.gz are recognized instead of collapsing to .gz.
+    """
+    name = os.path.basename(archive_path).lower()
+    if name.endswith(".zip"):
+        return "zip"
+    if name.endswith(".rar"):
+        return "rar"
+    if name.endswith(".7z"):
+        return "7z"
+    if (
+        name.endswith(".tar")
+        or name.endswith(".tar.gz")
+        or name.endswith(".tgz")
+        or name.endswith(".tar.bz2")
+        or name.endswith(".tbz2")
+        or name.endswith(".tar.xz")
+        or name.endswith(".txz")
+    ):
+        return "tar"
+    return ""
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print(
@@ -153,19 +210,21 @@ def main() -> None:
         )
         sys.exit(1)
 
-    ext = os.path.splitext(archive_path)[1].lower()
+    fmt = detect_format(archive_path)
     tmp_dir = output_dir or make_tmp_dir()
 
     try:
-        if ext == ".zip":
+        if fmt == "zip":
             unpack_zip(archive_path, tmp_dir)
-        elif ext == ".rar":
+        elif fmt == "rar":
             unpack_rar(archive_path, tmp_dir)
-        elif ext == ".7z":
+        elif fmt == "7z":
             unpack_7z(archive_path, tmp_dir)
+        elif fmt == "tar":
+            unpack_tar(archive_path, tmp_dir)
         else:
             print(
-                json.dumps({"success": False, "error": f"Unsupported archive format: {ext}"}),
+                json.dumps({"success": False, "error": f"Unsupported archive format: {os.path.basename(archive_path)}"}),
                 flush=True,
             )
             sys.exit(1)

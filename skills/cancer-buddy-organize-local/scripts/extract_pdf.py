@@ -9,7 +9,7 @@ def extract(pdf_path: str) -> dict:
     try:
         import pdfplumber
     except ImportError:
-        return {"success": False, "error": "pdfplumber is not installed. Run: uv pip install pdfplumber"}
+        return {"success": False, "error": "pdfplumber is not installed. Run: pip install -r requirements-extract.txt (see INSTALL.md)"}
 
     try:
         pages_text = []
