@@ -132,6 +132,8 @@ Layer 1 应在每次 subprocess 调用前都 prepend 这两个 env，**不要**�
 
 ## Fallback — PaddleOCR 不可用时
 
+> **隐私模式开关（`no_cloud_fallback`）**：下面 4 条 fallback 默认会降级到 Claude vision（云多模态）。当 `CB_NO_CLOUD_FALLBACK=1` / `--no-cloud-fallback` / `--strict-paddle`（别名）任一被设置时，**禁止所有 vision/云 fallback**——命中任何一条改为**跳过该文件**并记 `ocr_unrecoverable_no_cloud: <basename>`（venv 整体不可用时记 `<reason>`），被跳过文件仍保留字节级镜像但不产 sidecar。详见 organizer-prompt.md 顶部「No-cloud-fallback 隐私模式」。本节描述的是**默认（隐私模式 OFF）**行为。
+
 按下列顺序判断：
 
 1. **venv 不存在** (`$HOME/.venvs/mtb-ocr/bin/python` 不存在)
@@ -155,8 +157,9 @@ Layer 1 应在每次 subprocess 调用前都 prepend 这两个 env，**不要**�
 PaddleOCR 默认中文模型对纯英文报告（如 NCCN 英文版 / 美国医院出院 summary）准确度 < 中文。处理规则：
 
 1. 文件名匹配 `[A-Za-z]{30,}` 或 OCR 头部 50 字非中文比例 > 70% → 标 `language: en`
-2. `language=en` 文件直接走 Claude vision（v1 兼容路径），不调 PaddleOCR
-3. 写 `readiness.warnings += ["english_doc_paddle_skip: <basename>"]`
+2. **隐私模式 OFF（默认）**：`language=en` 文件直接走 Claude vision（v1 兼容路径），不调 PaddleOCR
+   **隐私模式 ON（`no_cloud_fallback`）**：**不**走云 vision；仍用本地 PaddleOCR 尝试（中文模型对英文准确度差但不上云优先），本地仍失败则跳过该文件
+3. 写 `readiness.warnings += ["english_doc_paddle_skip: <basename>"]`（隐私模式 ON 且本地失败时写 `["ocr_unrecoverable_no_cloud: <basename> (english doc, local-only)"]`）
 
 ## 调用示例（subagent 实际执行）
 

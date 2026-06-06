@@ -191,6 +191,8 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 
 **Fallback**: 如检测到 venv 不存在或 paddleocr import 失败 → 自动降级到 v1 行为（Claude vision 直接 OCR），并在 readiness.warnings 标记 `paddleocr_unavailable`。
 
+**隐私模式（`--no-cloud-fallback` / `CB_NO_CLOUD_FALLBACK=1`，v2.2 新增）**: 禁止**所有** vision/云 fallback（venv 不可用 / 单文件失败 / 批量失败 / 英文文档跳过 Layer 1 四条全覆盖）。命中即跳过该文件 + 记 `ocr_unrecoverable_no_cloud: <basename>`，绝不上传原图。`--strict-paddle` 是其别名（语义已扩展为整条 vision fallback 链）。隐私优先 / 非 Claude runtime（Codex/GPT）服务器部署必须开此开关。详见 organizer-prompt.md 顶部「No-cloud-fallback 隐私模式」。
+
 **首次运行性能**: PaddleOCR 模型懒加载，首次 OCR 约 +30s 模型下载/加载，之后 ~3-5s/图。63 张图实测 27.9 min（含 LLM 分类）。
 
 ## 10. 已做决策（不再讨论）
