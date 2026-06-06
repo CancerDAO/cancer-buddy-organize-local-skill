@@ -145,20 +145,23 @@ def classify_line(text: str) -> tuple[str, str | None, float | None]:
     return ("keep", None, None)
 
 
-def _run_ner_batch(lines_classified: list):
-    """Regex-first, then NER for names only."""
-    # Phase 1: regex — instant
-    ner_candidates = []
-    for i, item in enumerate(lines_classified):
+def _run_regex_batch(lines_classified: list):
+    """Regex PII pass — instant, no model needed. Marks id/phone/labeled lines."""
+    for item in lines_classified:
         pii_type, label_ratio = _classify_by_patterns(item["text"])
         if pii_type:
             item["classification"] = "pii"
             item["pii_type"] = pii_type
             item["label_ratio"] = label_ratio
-        else:
-            ner_candidates.append(i)
 
-    # Phase 2: NER for remaining lines — only detect names
+
+def _run_ner_batch(lines_classified: list):
+    """NER for names only — runs on lines not already flagged as PII by regex."""
+    ner_candidates = [
+        i for i, item in enumerate(lines_classified)
+        if item["classification"] == "keep"
+    ]
+
     engine = _init_ner_engine()
     if engine is None or not ner_candidates:
         return
@@ -575,6 +578,9 @@ def redact_image_ocr(
             "pii_type": None,
             "label_ratio": None,
         })
+    # Regex PII pass always runs (id/phone/labeled name) — no model needed.
+    _run_regex_batch(lines_classified)
+    # NER (names only) is opt-out via --no-ner.
     if not no_ner:
         _run_ner_batch(lines_classified)
 
@@ -678,7 +684,7 @@ def main():
     parser.add_argument("--confidence", type=float, default=0.5,
                         help="OCR confidence threshold (default: 0.5)")
     parser.add_argument("--no-ner", action="store_true",
-                        help="Skip NER classification; all lines kept (debug/fallback)")
+                        help="Skip PaddleNLP NER; regex PII detection (id/phone/labeled name) still runs")
     args = parser.parse_args()
 
     input_path = Path(args.input).expanduser().resolve()
