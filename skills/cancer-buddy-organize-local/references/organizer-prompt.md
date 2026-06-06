@@ -202,17 +202,29 @@ echo "Unique: $(wc -l < /tmp/cb-v2-unique-files.txt) | Duplicates: $(wc -l < /tm
 
 ### 3.1 图片 (jpg/png/tiff/webp)
 
+PaddleOCR 第一次推理要加载+编译模型（数十秒）；之后同进程内每张仅 ~10s。**所以务必优先用批处理**——把全部唯一图片喂给一次调用，模型只加载一次。逐文件分别起进程（每张都冷启动重载模型）在几百页时会慢一个数量级、必然超时。
+
+**首选：批处理（一次进程，OCR 全部唯一图片）**
+
 ```bash
+# 从唯一文件集里筛出图片（PDF/DOCX 等走 3.2/3.3）
+grep -iE '\.(jpg|jpeg|png|bmp|tiff|tif|webp)$' /tmp/cb-v2-unique-files.txt > /tmp/cb-v2-images.txt
 "$paddle_python" "$skill_dir/scripts/redact_ocr.py" \
-    "$f" --output "/tmp/cb-v2-$$/$(basename $f .${f##*.})_redacted.jpg" \
-    --no-ner 2>&1
+    --batch /tmp/cb-v2-images.txt \
+    --out-dir "/tmp/cb-v2-$$/redacted" --no-ner > /tmp/cb-v2-ocr.jsonl 2>/dev/null
 ```
 
-stdout JSON: `{"success": bool, "ocr_text_safe": str, "pii_detected": int, "regions": [...]}`
+输出 `/tmp/cb-v2-ocr.jsonl`：**每行一张图的结果**（最后一行是 `{"batch_summary": true, "total", "ok", "failed"}`）。每条含
+`{"input": path, "success": bool, "ocr_text_safe": str, "pii_detected": int, "regions": [...], "ner_available": bool, ...}`——**隐私上 `ocr_text_full`（未脱敏全文）绝不输出**，只给脱敏后的 `ocr_text_safe`。
+
+逐行读这个 JSONL，对**每张图**按下面规则处理（与单文件语义完全一致），`input` 即原文件路径：
+
+> 单文件回退（仅当只有极少量图、或某张需单独重跑时）：
+> `"$paddle_python" "$skill_dir/scripts/redact_ocr.py" "$f" --output "/tmp/cb-v2-$$/$(basename $f .${f##*.})_redacted.jpg" --no-ner`
 
 - `success: true` → 字节级复制原文件到 `10_原始文件/原始未遮挡/<basename>` (字节级镜像，未脱敏)
 - `success: false` 或 timeout → 应用**隐私 fallback 策略**（顶部 §）：`deny` 默认标 `ocr_gap_local_only` + 进未分类；`allow` 才走多模态 vision。两者都写 readiness.warnings: `paddle_ocr_failed: <basename>`
-- 注意 redact_ocr.py 输出的 `ner_available: false` 字段（x86 上 paddlenlp/aistudio-sdk 常坏）→ 加一条 yellow review_flag `ner_unavailable_name_redaction_degraded`：自由游走人名仅靠 regex 标签，可能漏检，Layer 2 §4.4 二次脱敏复查必须更严格
+- 注意每条记录的 `ner_available: false` 字段（x86 上 paddlenlp/aistudio-sdk 常坏）→ 加一条 yellow review_flag `ner_unavailable_name_redaction_degraded`：自由游走人名仅靠 regex 标签，可能漏检，Layer 2 §4.4 二次脱敏复查必须更严格
 
 ### 3.2 PDF
 

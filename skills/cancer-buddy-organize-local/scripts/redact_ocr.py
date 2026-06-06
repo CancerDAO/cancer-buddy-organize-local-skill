@@ -705,11 +705,65 @@ def redact_image_ocr(
 # ---------------------------------------------------------------------------
 
 
+def _run_batch(args):
+    """Batch mode: OCR + redact many images in ONE process.
+
+    `args.batch` is a manifest file (one image path per line) or a directory of
+    images. Because the per-thread PaddleOCR instance is cached (see
+    `_get_ocr_instance`), the heavy model load happens ONCE for the whole batch
+    instead of once per file — this is the dominant cost when ingesting hundreds
+    of page-images (per-process model reload was ~8s/file). Runs strictly
+    sequentially in a single process (no `&`/parallelism, so it is safe under a
+    streaming agentic runtime).
+
+    Emits JSONL to stdout: one JSON object per image, plus a final
+    `{"batch_summary": true, ...}` line. PRIVACY: the unredacted `ocr_text_full`
+    is NEVER emitted — only `ocr_text_safe` (redacted) and the PII regions.
+    """
+    supported = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
+    bp = Path(args.batch).expanduser()
+    if bp.is_dir():
+        paths = sorted(str(p) for p in bp.rglob("*") if p.suffix.lower() in supported)
+    elif bp.is_file():
+        paths = [ln.strip() for ln in bp.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    else:
+        print(json.dumps({"success": False, "error": f"--batch path not found: {bp}"}))
+        sys.exit(1)
+
+    out_dir = Path(args.out_dir).expanduser() if args.out_dir else None
+    if out_dir:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    ok_n = fail_n = 0
+    for ip in paths:
+        ipath = Path(ip).expanduser()
+        rec = {"input": str(ipath)}
+        try:
+            if not ipath.exists():
+                rec.update({"success": False, "error": "file not found"})
+            elif ipath.suffix.lower() not in supported:
+                rec.update({"success": False, "error": f"unsupported type: {ipath.suffix}"})
+            else:
+                op = str((out_dir or ipath.parent) / f"{ipath.stem}_redacted{ipath.suffix}")
+                r = redact_image_ocr(
+                    input_path=str(ipath), output_path=op,
+                    confidence_threshold=args.confidence, debug=False, no_ner=args.no_ner,
+                )
+                # privacy: pass everything through EXCEPT the unredacted full text
+                rec.update({k: v for k, v in r.items() if k != "ocr_text_full"})
+        except Exception as e:
+            rec.update({"success": False, "error": str(e)})
+        ok_n, fail_n = (ok_n + 1, fail_n) if rec.get("success") else (ok_n, fail_n + 1)
+        print(json.dumps(rec, ensure_ascii=False), flush=True)
+    print(json.dumps({"batch_summary": True, "total": len(paths), "ok": ok_n, "failed": fail_n},
+                     ensure_ascii=False), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="OCR-based PII redaction for Chinese medical documents."
     )
-    parser.add_argument("input", help="Path to input image file")
+    parser.add_argument("input", nargs="?", help="Path to a single input image file")
     parser.add_argument("--output", help="Output file path (default: [name]_redacted.[ext])")
     parser.add_argument("--debug", action="store_true",
                         help="Save annotated debug image showing PII regions (red boxes)")
@@ -718,7 +772,23 @@ def main():
     parser.add_argument("--no-ner", action="store_true",
                         help="Skip PaddleNLP name-NER (no paddlenlp needed). "
                              "Regex PII floor (ID/phone/labeled fields) STILL applies.")
+    parser.add_argument("--batch", metavar="MANIFEST_OR_DIR",
+                        help="Batch mode: a manifest file (one image path per line) or a "
+                             "directory of images. OCR + redact ALL of them in ONE process "
+                             "(model loaded once instead of per-file). Emits JSONL to stdout; "
+                             "the unredacted full text is NEVER emitted (only ocr_text_safe).")
+    parser.add_argument("--out-dir", metavar="DIR",
+                        help="Output directory for redacted images in --batch mode "
+                             "(default: alongside each input file).")
     args = parser.parse_args()
+
+    if args.batch:
+        _run_batch(args)
+        return
+
+    if not args.input:
+        print(json.dumps({"success": False, "error": "no input: provide an image path or --batch"}))
+        sys.exit(1)
 
     input_path = Path(args.input).expanduser().resolve()
     if not input_path.exists():
