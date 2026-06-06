@@ -39,7 +39,40 @@ pip install --upgrade pip
 
 > **Python 版本要求**：≥ 3.10。Apple Silicon 用 `python3` 系统自带或 brew 装的都行。
 
-### 2.2 装 PaddleOCR
+### 2.2 装 PaddleOCR / PaddleNLP
+
+#### Linux x86_64 CPU（已验证）
+
+Linux x86_64 CPU 环境请使用固定版本依赖，不要直接无锁安装 `paddlepaddle paddleocr paddlenlp`。
+
+```bash
+pip install -r requirements-linux-x86-cpu.txt
+```
+
+这组依赖已在 Ubuntu 24.04.4 x86_64 / Python 3.12.3 上验证：
+
+```text
+paddlepaddle==3.1.1
+paddleocr==3.4.0
+paddlex==3.4.3
+paddlenlp==2.6.1
+aistudio-sdk==0.3.5
+numpy==1.26.4
+```
+
+PaddleNLP Taskflow 在这组依赖下需要设置兼容环境变量：
+
+```bash
+export FLAGS_enable_pir_api=0
+```
+
+也可以在单次命令前加：
+
+```bash
+FLAGS_enable_pir_api=0 python skills/cancer-buddy-organize-local/scripts/redact_ocr.py INPUT --output OUTPUT --debug
+```
+
+#### 其他平台
 
 ```bash
 pip install paddlepaddle paddleocr paddlenlp
@@ -49,8 +82,8 @@ pip install paddlepaddle paddleocr paddlenlp
 
 - **Mac (Apple Silicon)**：默认 `paddlepaddle` 是 CPU 版，开箱可用。Metal GPU 加速目前 PaddlePaddle 不支持，CPU 推理一张报告约 2-4 秒。
 - **Mac (Intel)**：同上。
-- **Linux (x86, CPU)**：同上。
-- **Linux (x86, NVIDIA GPU)**：`pip install paddlepaddle-gpu`（详见 PaddlePaddle 官网选型）。
+- **Linux (x86, CPU)**：建议优先使用上面的 `requirements-linux-x86-cpu.txt`。
+- **Linux (x86, NVIDIA GPU)**：`pip install paddlepaddle-gpu`（详见 PaddlePaddle 官网选型），需要单独验证对应 PaddleOCR/PaddleNLP 版本。
 - **Windows / WSL**：建议 WSL2 + Ubuntu，按 Linux 流程。
 
 ### 2.3 装运行时依赖
@@ -78,16 +111,40 @@ pip install \
 ~/.venvs/mtb-ocr/bin/python -c "import paddlenlp; print('paddlenlp', paddlenlp.__version__)"
 ```
 
-期望输出类似：
+Linux x86_64 CPU 固定依赖下，建议同时确认版本：
 
+```bash
+~/.venvs/mtb-ocr/bin/python - <<'PY'
+import importlib.metadata as m
+
+for p in [
+    "paddlepaddle",
+    "paddleocr",
+    "paddlex",
+    "paddlenlp",
+    "aistudio-sdk",
+    "numpy",
+]:
+    print(f"{p}=={m.version(p)}")
+PY
 ```
-paddleocr 3.x.y
-paddlenlp 2.x.y
+
+期望 Linux x86_64 CPU 输出包含：
+
+```text
+paddlepaddle==3.1.1
+paddleocr==3.4.0
+paddlex==3.4.3
+paddlenlp==2.6.1
+aistudio-sdk==0.3.5
+numpy==1.26.4
 ```
 
-首次运行会自动下载 PP-OCRv4 模型（约 300MB，缓存到 `~/.paddleocr/`），后续不再下载。
+如果要运行 PaddleNLP Taskflow，请先设置：
 
----
+```bash
+export FLAGS_enable_pir_api=0
+```
 
 ## 3. 跑一遍试试
 

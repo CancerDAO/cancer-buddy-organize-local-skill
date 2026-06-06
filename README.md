@@ -50,7 +50,11 @@ npx skills add CancerDAO/cancer-buddy-organize-local-skill -g
 # 2. 装 PaddleOCR Python venv（一次性，约 5-10 分钟）
 # 详见 INSTALL.md
 python3 -m venv ~/.venvs/mtb-ocr
-~/.venvs/mtb-ocr/bin/pip install paddlepaddle paddleocr paddlenlp
+
+# Linux x86_64 CPU 用户请使用固定依赖：
+~/.venvs/mtb-ocr/bin/pip install -r requirements-linux-x86-cpu.txt
+
+# 其他平台见 INSTALL.md
 
 # 3. 验证
 ~/.venvs/mtb-ocr/bin/python -c "import paddleocr; print('OK')"
