@@ -121,6 +121,8 @@ $HOME/CancerDAO/patients/PT-<10-hex>/
 
 ## 4. Fallback 行为
 
+### 4.1 默认（隐私模式 OFF）
+
 PaddleOCR 不可用时，skill **不会**直接报错——它会自动降级到 Claude vision（即默认 `cancer-buddy-organize` 的行为），但会在 readiness.json 里加一个 review_flag：
 
 ```json
@@ -131,13 +133,38 @@ PaddleOCR 不可用时，skill **不会**直接报错——它会自动降级到
 }
 ```
 
-触发降级的条件：
+触发降级的条件（这四条都会走 vision）：
 
-- `~/.venvs/mtb-ocr/bin/python` 不存在
-- `import paddleocr` 失败（版本不兼容 / 依赖缺失）
-- 单张图片 OCR 超时 > 60 秒（罕见，通常是图片损坏）
+- `~/.venvs/mtb-ocr/bin/python` 不存在 / `import paddleocr` 失败（版本不兼容 / 依赖缺失）
+- 单张图片 OCR 失败或超时（罕见，通常是图片损坏）
+- 整批 OCR 失败率 > 30%
+- 英文文档跳过 Layer 1（PaddleOCR 中文模型对英文准确度差）
 
-如果你不想要 fallback、宁可让 skill 报错退出，在调用时加 `--strict-paddle`（详见 [paddleocr-integration.md](skills/cancer-buddy-organize-local/references/paddleocr-integration.md)）。
+### 4.2 隐私模式（`--no-cloud-fallback` / `CB_NO_CLOUD_FALLBACK=1`）—— 强制不上云
+
+**隐私优先 / 服务器部署务必开此模式。** 上面 4 条 fallback 在**非 Claude runtime**（Codex/GPT）上等于"把原始病历图发去那个 runtime 的云多模态模型"——原始 PII 离开本机，直接违背本 skill「本地脱敏、不上云」核心前提。结合"x86 Linux 上 PaddleOCR 装不起来 → 必然触发 fallback"，这个隐私风险在服务器部署下会真实发生。
+
+开启方式（任一）：
+
+```bash
+# 环境变量
+export CB_NO_CLOUD_FALLBACK=1
+
+# 或调用参数
+/cancer-buddy-organize-local --no-cloud-fallback <path>
+
+# --strict-paddle 是别名（向后兼容；语义已从"仅 venv 不可用时报错"扩展为"覆盖整条 vision fallback 链"）
+/cancer-buddy-organize-local --strict-paddle <path>
+```
+
+开启后：上述 4 条 fallback **一律不上云**。命中任何一条时，该文件被**跳过**（仍字节级镜像进 `10_原始文件/原始未遮挡/`，但不产 OCR sidecar），并在 `readiness.warnings` 记 `ocr_unrecoverable_no_cloud: <basename>`，相关 readiness 域据此扣分。文本型文件（PDF 文本层 / DOCX / XLSX / TXT / MD）不依赖 vision，仍正常处理。
+
+> 旧版 `--strict-paddle` 只覆盖"PaddleOCR venv 不可用"一条；现已扩展为覆盖**整条 vision fallback 链**（含单文件失败 / 批量失败 / 英文文档跳过 Layer 1）。详见 [paddleocr-integration.md](skills/cancer-buddy-organize-local/references/paddleocr-integration.md) Fallback 节 + [organizer-prompt.md](skills/cancer-buddy-organize-local/references/organizer-prompt.md) 顶部「No-cloud-fallback 隐私模式」。
+
+### 4.3 支持的 agentic runtime
+
+- **Claude Code** — 参考实现，dogfood 验证过。worker prompt 用它的工具名（Read / Write / Bash / Agent / Monitor）。
+- **Codex / GPT / 其它"只有 shell + 文件读写"的 agentic 壳** — 可用。[organizer-prompt.md](skills/cancer-buddy-organize-local/references/organizer-prompt.md) 顶部「Runtime adaptation / 运行时适配」给了中性映射表（读文件 / 写文件 / 跑 shell / 派子任务-或内联），把 Claude Code 工具名映射到等价能力即可。**在这些 runtime 上跑生产数据必须配 `--no-cloud-fallback`**，否则 OCR 失败时原图会被发去该 runtime 的云模型。
 
 ---
 

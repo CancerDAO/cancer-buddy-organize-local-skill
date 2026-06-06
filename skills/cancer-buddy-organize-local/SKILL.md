@@ -48,6 +48,7 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 - `input_path` (必填)：folder / .zip / .rar / .7z / .tar.gz / .pdf / .docx 绝对路径
 - `--alias <name>` (可选)：覆盖默认 `PT-<hex>` patient_code（例 `--alias 程女士-2026`）。**v2.1 警告**：`--alias` 包含真名时调用方必须主动告知用户："patient_code 会出现在所有路径 / 下游报告 / 文件系统 — 用真名意味着 PII 直接暴露在文件系统层"。生产数据建议一律 `PT-<hex>`，仅 demo / 教学 / 单人本地审阅场景才用真名 alias。
 - `--merge-into <patient_code>` (可选, 显式触发 Layer 3.5)：把 input 内容作为补充材料 merge 进已有 patient_dir
+- `--no-cloud-fallback` (可选, 隐私模式)：禁止**所有** vision/云多模态 fallback。本地 PaddleOCR 失败时**不**降级到云读图，改为跳过该文件 + 记 `ocr_unrecoverable_no_cloud: <basename>`。也可用环境变量 `CB_NO_CLOUD_FALLBACK=1` 开启。`--strict-paddle` 是其**别名**（向后兼容；语义已从"仅 venv 不可用时报错"扩展为"覆盖整条 vision fallback 链"）。**隐私优先 / x86 服务器部署（PaddleOCR 装不起来必然触发 fallback）务必开此开关**，否则原始病历图会被发去云端，违背本 skill「本地脱敏、不上云」前提。
 
 ## Outputs
 
@@ -90,8 +91,11 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 - patient_data_root: <resolved>
 - mode: <full | merge_only | default_upgrade>
 - paddle_python: <~/.venvs/mtb-ocr/bin/python or "fallback">
+- no_cloud_fallback: <true | false>   # true 当 CB_NO_CLOUD_FALLBACK=1 / --no-cloud-fallback / --strict-paddle 任一被设置
 - skill_dir: <absolute path to this skill — Layer 1 scripts live in $skill_dir/scripts/. Typical install: ~/.claude/skills/cancer-buddy-organize-local>
 ```
+
+> **隐私模式解析**：dispatcher 解析 `CB_NO_CLOUD_FALLBACK` 环境变量、`--no-cloud-fallback`、`--strict-paddle`（别名）三者，任一为真即 `no_cloud_fallback: true`，并在向用户复述时声明"已开启隐私模式：本地 OCR 失败的文件会被跳过、绝不上传云多模态"。
 
 Subagent 跑完返回 pure JSON：
 
@@ -106,6 +110,8 @@ Subagent 跑完返回 pure JSON：
   "paddleocr_used": true,
   "paddleocr_failure_count": 0,
   "vision_fallback_count": 0,
+  "no_cloud_fallback": false,
+  "ocr_skipped_no_cloud_count": 0,
   "readiness_grade": "B",
   "readiness_score": 72,
   "blocking_gaps": ["无 PD-L1 CPS 检测", "无病理报告原件"],
@@ -185,6 +191,12 @@ Subagent 跑完返回 pure JSON：
 | **family** | 拒绝："病历整理要靠主照护者操作（Ta 手里有原件）。要不要生成一份 2 页要点让 Ta 参考？" 不跑 organize |
 
 详见 [`../../references/roles.md`](../../references/roles.md)（vendored from cancer-buddy-skill main repo）。
+
+## Supported agentic runtimes
+
+- **Claude Code** — 参考实现（reference）；本仓所有措辞（Read / Write / Bash / Agent / Monitor 工具）以它为准，dogfood 验证过。
+- **Codex / GPT / 其它"只有 shell + 文件读写"的 agentic 壳** — 可用。worker prompt（[`references/organizer-prompt.md`](references/organizer-prompt.md)）顶部有「Runtime adaptation / 运行时适配」中性映射表（读文件 / 写文件 / 跑 shell / 派子任务-或内联），把 Claude Code 工具名映射到你 runtime 的等价能力即可，整条 pipeline 不变。
+- **⚠️ 跨 runtime 的云 fallback 警告**：非 Claude runtime 上，"OCR 失败降级到 vision" 会变成"把原图喂给你那个 runtime 的云多模态模型" = 原始 PII 上云。**隐私优先 / 服务器部署必须用 `--no-cloud-fallback`（或 `CB_NO_CLOUD_FALLBACK=1`）**，强制本地失败即跳过、绝不上云。详见 [INSTALL.md §4](../../INSTALL.md)。
 
 ## Safety
 

@@ -60,6 +60,11 @@ python3 -m venv ~/.venvs/mtb-ocr
 
 完整安装、PaddleOCR 调试、fallback 行为见 [INSTALL.md](INSTALL.md)。
 
+### 支持的 agentic runtime
+
+- **Claude Code** — 参考实现，dogfood 验证过（worker prompt 用它的 Read / Write / Bash / Agent 工具名）。
+- **Codex / GPT / 其它"只有 shell + 文件读写"的 agentic 壳** — 可用。worker prompt 顶部有「Runtime adaptation / 运行时适配」中性映射表，把 Claude Code 工具名映射到等价能力即可。**在非 Claude runtime 上跑生产数据务必加 `--no-cloud-fallback`**，否则 OCR 失败时原始病历图会被发去该 runtime 的云多模态模型（违背"本地脱敏、不上云"前提）。详见 [INSTALL.md §4](INSTALL.md)。
+
 ---
 
 ## 用法
@@ -150,7 +155,7 @@ $HOME/CancerDAO/patients/
 ## 注意事项
 
 - 本工具不提供医疗诊断或治疗建议——所有医疗决策需与专业医生确认
-- PaddleOCR 中文模型对手写 / 印章 / 严重模糊文档准确率有限，本 skill 在这些场景会自动 fallback 到 Claude vision（你可以通过 paddleocr-integration.md 调整阈值）
+- PaddleOCR 中文模型对手写 / 印章 / 严重模糊文档准确率有限，本 skill **默认**在这些场景自动 fallback 到 Claude vision（你可以通过 paddleocr-integration.md 调整阈值）。**隐私优先 / 服务器部署请加 `--no-cloud-fallback`（或 `CB_NO_CLOUD_FALLBACK=1`）**：本地 OCR 失败的文件会被跳过、绝不上传任何云多模态模型——这对在 Codex/GPT 等非 Claude runtime 上跑生产数据尤其重要（否则原图会被发去该 runtime 的云模型）。详见 [INSTALL.md §4](INSTALL.md)。
 - 字符校正只能改 OCR 错字，**禁止**做语义改写
 - 10_原始文件/原始未遮挡/ 是字节级镜像——永远本地 only，不要 commit 到任何 git 仓
 
