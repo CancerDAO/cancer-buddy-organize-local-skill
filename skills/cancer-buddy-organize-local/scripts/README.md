@@ -41,15 +41,17 @@ diff "$SRC/redact_ocr.py" "$DST/redact_ocr.py"
 # 看变更后再决定是否 cp
 ```
 
-## 当前 vendored 版本快照 (2026-05-04)
+## 当前 vendored 版本快照 (2026-06-07)
 
 ```
 a979282c31d37ed20cdeb7a724cf63075a255135a2e657b4d65f28ab94ed1401  extract_docx.py
 7e31a2a1d5f469c8f614809ddf2b5ae1c14b3cad273ff51fa7ce8fd64f6ec3ac  extract_excel.py
 badf97cc42ff431c319405d96a7aa0b9bc8ee12780f4f670df21134545fab94e  extract_pdf.py
-49bd9ab6c87af26a6d3e5885f764000bae98cb7e119eba80f2b3d82f23bd2711  redact_ocr.py
+13c733908a61ec923f1027e414b3ab13e6e1cde1f7fb1bf903929fa7a558b268  redact_ocr.py
 4197d19f070d8126b890d2c875455f4af998f0a8f4331b031fc008e44a2cb363  unpack_archive.py
 ```
+
+> `redact_ocr.py` 含 skill-local 改动（`--batch` 批处理 + 逐张超时 + text_preview token 化脱敏），不在上游 mtb-core，按"修改原则"第 1 条不回推。
 
 ## 修改原则
 

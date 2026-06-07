@@ -211,11 +211,12 @@ PaddleOCR 第一次推理要加载+编译模型（数十秒）；之后同进程
 grep -iE '\.(jpg|jpeg|png|bmp|tiff|tif|webp)$' /tmp/cb-v2-unique-files.txt > /tmp/cb-v2-images.txt
 "$paddle_python" "$skill_dir/scripts/redact_ocr.py" \
     --batch /tmp/cb-v2-images.txt \
-    --out-dir "/tmp/cb-v2-$$/redacted" --no-ner > /tmp/cb-v2-ocr.jsonl 2>/dev/null
+    --out-dir "/tmp/cb-v2-$$/redacted" --no-ner \
+    > /tmp/cb-v2-ocr.jsonl 2>/tmp/cb-v2-ocr.err   # stderr → 文件（不要 /dev/null，崩溃要能诊断）
 ```
 
 输出 `/tmp/cb-v2-ocr.jsonl`：**每行一张图的结果**（最后一行是 `{"batch_summary": true, "total", "ok", "failed"}`）。每条含
-`{"input": path, "success": bool, "ocr_text_safe": str, "pii_detected": int, "regions": [...], "ner_available": bool, ...}`——**隐私上 `ocr_text_full`（未脱敏全文）绝不输出**，只给脱敏后的 `ocr_text_safe`。
+`{"input": path, "success": bool, "ocr_text_safe": str, "pii_detected": int, "regions": [...], "ner_requested": bool, "ner_available": bool|null, ...}`——**隐私上 `ocr_text_full`（未脱敏全文）绝不输出**，只给脱敏后的 `ocr_text_safe`；`regions[].text_preview` 也已是不可逆 token（`<类型:N字>`），不含明文 PII。每张图有逐张超时（`--timeout`，默认 300s），单张卡死会产出 `{"success": false, "error": "timeout"}` 后**继续**下一张，不会拖垮整批。
 
 逐行读这个 JSONL，对**每张图**按下面规则处理（与单文件语义完全一致），`input` 即原文件路径：
 
@@ -223,8 +224,9 @@ grep -iE '\.(jpg|jpeg|png|bmp|tiff|tif|webp)$' /tmp/cb-v2-unique-files.txt > /tm
 > `"$paddle_python" "$skill_dir/scripts/redact_ocr.py" "$f" --output "/tmp/cb-v2-$$/$(basename $f .${f##*.})_redacted.jpg" --no-ner`
 
 - `success: true` → 字节级复制原文件到 `10_原始文件/原始未遮挡/<basename>` (字节级镜像，未脱敏)
-- `success: false` 或 timeout → 应用**隐私 fallback 策略**（顶部 §）：`deny` 默认标 `ocr_gap_local_only` + 进未分类；`allow` 才走多模态 vision。两者都写 readiness.warnings: `paddle_ocr_failed: <basename>`
-- 注意每条记录的 `ner_available: false` 字段（x86 上 paddlenlp/aistudio-sdk 常坏）→ 加一条 yellow review_flag `ner_unavailable_name_redaction_degraded`：自由游走人名仅靠 regex 标签，可能漏检，Layer 2 §4.4 二次脱敏复查必须更严格
+- `success: false` 或 `error: "timeout"` → 应用**隐私 fallback 策略**（顶部 §）：`deny` 默认标 `ocr_gap_local_only` + 进未分类；`allow` 才走多模态 vision。两者都写 readiness.warnings: `paddle_ocr_failed: <basename>`
+- **必须对账（防静默丢页）**：批处理被外层 kill / paddle 早崩时，`/tmp/cb-v2-images.txt` 里的某些图可能在 JSONL 里**完全没有对应记录**（连 `success:false` 都没有）。读完 JSONL 后，用 `input` 字段与 `/tmp/cb-v2-images.txt` 逐行对账：**任何在 manifest 里、却没有 JSONL 记录的图**，一律按上面的 `success:false` 分支处理（deny-fallback + `paddle_ocr_failed`），绝不能静默跳过——患者病历少一页是保真/安全事故。同时确认最后一行 `batch_summary` 存在；缺失说明批处理是被中断的，对账尤其重要。
+- 注意每条记录的 NER 状态：`--no-ner` 模式下 `ner_available` 恒为 `null`（不是 `false`），名字 NER 本就没跑。判断降级要看 `ner_requested == true && ner_available == false`（x86 上 paddlenlp/aistudio-sdk 常坏的情形）→ 加一条 yellow review_flag `ner_unavailable_name_redaction_degraded`。无论哪种，当前默认就是 `--no-ner`（自由游走人名仅靠 regex 标签、可能漏检），Layer 2 §4.4 二次脱敏复查**必须**更严格。
 
 ### 3.2 PDF
 
@@ -831,6 +833,12 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 
 ## Step 6 — Final return
 
+**先清理临时文件（CRITICAL — 防 PII 残留落盘）**：`/tmp/cb-v2-ocr.jsonl` 里的 `regions[].text_preview`、`/tmp/cb-v2-$$/redacted/` 的脱敏图、`/tmp/cb-v2-*.txt`/`.tsv`/`.err` 都是过程产物，含或曾含患者相关数据，**不允许长期留在 `/tmp`**。归档与 sidecar 写完、§4.4 grep 闸门 pass 后，删干净：
+
+```bash
+rm -rf /tmp/cb-v2-* 2>/dev/null   # ocr.jsonl / images.txt / hashes.tsv / unique/dup/empty / $$/redacted / ocr.err 全清
+```
+
 最后一条消息**必须是 pure JSON**，无前后文：
 
 ```json
@@ -864,7 +872,9 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 | 单文件 OCR 失败 | 同上（按文件），readiness.warnings += `paddle_ocr_failed: <name>` |
 | 整批 OCR 失败率 > 30% | 同上（整批），readiness.warnings += `paddleocr_bulk_failure_rate` |
 | `cloud_vision_fallback: deny` 下有图片 OCR 失败 | 标 `ocr_gap_local_only`，文件进 `10_原始文件/未分类/`，加 yellow review_flag，**绝不上云**，继续跑 |
-| redact_ocr 返回 `ner_available: false` | 加 review_flag `ner_unavailable_name_redaction_degraded`（自由人名仅 regex 兜底），§4.4 二次脱敏更严格 |
+| 批处理单张 `error: "timeout"` | 按"单文件 OCR 失败"处理（deny-fallback + `paddle_ocr_failed: <name>`），批处理已自动跳到下一张 |
+| 图片在 manifest 但 JSONL 无任何记录（批处理被中断/早崩） | §3.1 对账：缺记录的图一律按 OCR 失败处理，**绝不静默丢页**；检查 `/tmp/cb-v2-ocr.err` 诊断 |
+| redact_ocr 记录 `ner_requested: true && ner_available: false` | 加 review_flag `ner_unavailable_name_redaction_degraded`（自由人名仅 regex 兜底），§4.4 二次脱敏更严格。注：默认 `--no-ner` 时 `ner_available` 为 `null`、不触发此条，但 §4.4 复查仍必跑 |
 | 必填字段（primary_cancer / histology / stage）抽不出 | profile.json 写 null + readiness.blocking_gaps 加该字段 + 不 abort（用户决定是否补料） |
 | 解压失败 | abort，返回 `{"error": "unpack_failed", "detail": "..."}` |
 | 文件名 flatten 后 mapping 丢失 | abort，返回 `{"error": "mapping_lost"}` |
