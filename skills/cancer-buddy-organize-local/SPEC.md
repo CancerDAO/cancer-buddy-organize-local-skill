@@ -187,7 +187,7 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 
 **venv**: `~/.venvs/mtb-ocr`（已装 paddleocr 3.4 + paddlepaddle 3.3 + paddlex）。v2 不要求用户自己装 paddlenlp（NER 走 regex fallback）。
 
-**调用方式**: subagent 走 Bash → `subprocess.run([PADDLE_PYTHON, redact_ocr_path, image, "--output", out, "--no-ner"])`，捕 stdout JSON。
+**调用方式（推荐：批处理）**: subagent 走 Bash → `redact_ocr.py --batch MANIFEST --out-dir DIR --no-ner [--timeout 300]`，模型只加载一次，输出 JSONL（每行一图 + 末行 `batch_summary`）。单文件 `subprocess.run([PADDLE_PYTHON, redact_ocr_path, image, "--output", out, "--no-ner"])`（捕 stdout JSON）保留为少量图回退。契约详见 `references/paddleocr-integration.md`。
 
 **Fallback**: 如检测到 venv 不存在或 paddleocr import 失败 → 自动降级到 v1 行为（Claude vision 直接 OCR），并在 readiness.warnings 标记 `paddleocr_unavailable`。
 

@@ -81,7 +81,39 @@ Skill 自洽，**不**依赖 mtb-core 仓库路径。脚本是从 mtb-core vendo
 ```json
 {"ner_requested": true, "ner_available": false, "ner_error": "ImportError: cannot import name 'download' ..."}
 ```
-`ner_requested:true` 且 `ner_available:false` → organizer 加 review_flag `ner_unavailable_name_redaction_degraded`。注意 `--no-ner` 仍跑 **regex 兜底脱敏**（身份证/手机/带标签字段）——只跳过无标签人名 NER，不是"不脱敏"。
+`ner_requested:true` 且 `ner_available:false` → organizer 加 review_flag `ner_unavailable_name_redaction_degraded`。注意 `--no-ner` 仍跑 **regex 兜底脱敏**（身份证/手机/带标签字段）——只跳过无标签人名 NER，不是"不脱敏"。`--no-ner`（默认）下 `ner_available` 为 `null`，判定降级须看 `ner_requested && !ner_available`。
+
+### 图片批处理（推荐） → JSONL (redact_ocr.py --batch)
+
+**为什么**：PaddleOCR 首次推理要加载+编译模型（x86 no-avx512 实测首张 ~74s），同进程暖态后才 ~10s/张。逐文件每张都付一次冷启动，几百页必然超时。批处理在**一个进程**里 OCR+脱敏所有图，模型只加载一次。
+
+**输入**：manifest 文件（每行一张图绝对路径）**或**目录。**输出**：JSONL 到 stdout，每行一张图，末行 `batch_summary`。
+
+```bash
+"$PADDLE_PYTHON" "$SKILL_DIR/scripts/redact_ocr.py" \
+    --batch /tmp/cb-v2-images.txt \
+    --out-dir "/tmp/cb-v2-$$/redacted" \
+    --no-ner \
+    --timeout 300 \                       # 逐张墙钟超时(秒)，0 关闭；Unix SIGALRM
+    > /tmp/cb-v2-ocr.jsonl 2>/tmp/cb-v2-ocr.err
+```
+
+**JSONL（每行一条）**：
+```json
+{"input": "/abs/0001.jpg", "success": true, "output": ".../0001_redacted.jpg",
+ "ocr_text_safe": "...", "pii_detected": 5,
+ "regions": [{"pii_type": "phone", "text_preview": "<phone:11字>", "quad_px": [[x,y],...]}],
+ "ner_requested": false, "ner_available": null}
+{"input": "/abs/0002.jpg", "success": false, "error": "timeout"}
+{"batch_summary": true, "total": 308, "ok": 305, "failed": 3}
+```
+
+契约要点：
+- **隐私**：批处理记录**绝不**含 `ocr_text_full`（未脱敏全文）；`regions[].text_preview` 是不可逆 `<类型:N字>` token，不含明文 PII。单文件 stdout 为兼容仍带 `ocr_text_full`，批处理刻意剥除（落盘安全）。
+- **稳健**：单张 `error:"timeout"` / `success:false` 后批处理**继续**；末行 `batch_summary` 即便中途异常也会从 `finally` 输出。
+- **防丢页**：被外层 kill / paddle 早崩时，manifest 里的图可能无任何 JSONL 记录 → organizer **必须**用 `input` 与 manifest 对账，缺记录按 OCR 失败处理，绝不静默丢页。
+- **stem 防覆盖**：不同目录同名图输出为 `_redacted` / `_redacted_1` …，不互相覆盖。
+- 单文件模式（上一节）保留为"极少量图 / 单张重跑"回退。
 
 ### PDF → 文本 (extract_pdf.py)
 

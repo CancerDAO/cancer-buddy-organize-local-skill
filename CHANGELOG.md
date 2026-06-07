@@ -1,5 +1,39 @@
 # Changelog — cancer-buddy-organize-local
 
+## Unreleased — feat/batch-ocr-redaction
+
+Batch OCR mode so PaddleOCR loads its model **once** for a whole patient upload
+instead of cold-starting per image (per-process reload was the dominant cost;
+~74s first image + ~10s/image after, on x86_64 no-avx512 / PP-OCRv5_server).
+A ~300-page upload drops from "hours / certain timeout" to "one cold start + N×~10s".
+
+- **`redact_ocr.py --batch MANIFEST_OR_DIR [--out-dir DIR] [--timeout SECONDS]`**:
+  OCR + redact all images in one process. Emits JSONL to stdout (one record per
+  image + a final `batch_summary` line). `input` is now optional (`nargs="?"`) so
+  single-file callers are unchanged.
+- **Privacy hardening** (applies to single-file mode too):
+  - Batch records strip the unredacted `ocr_text_full`; only `ocr_text_safe` ships.
+  - `regions[].text_preview` is now a non-reversible `<type:N字>` token instead of
+    `text[:6]` — the old prefix leaked entire short Chinese names, and batch mode
+    persists records to a file on disk (was ephemeral stdout). No cleartext PII
+    leaves the OCR step.
+- **Robustness**:
+  - Per-image SIGALRM timeout (`--timeout`, default 300s): a hung/corrupt image
+    yields `{"success": false, "error": "timeout"}` and the batch continues — one
+    bad page no longer hangs the whole run. Model is warmed up once **before** any
+    timer arms, so a SIGALRM can never interrupt paddle mid-init (which would
+    poison the process). `batch_summary` is emitted from a `finally` even on abort.
+  - Collision-safe output naming: same-basename inputs from different folders no
+    longer silently overwrite each other (`_redacted`, `_redacted_1`, …).
+  - Directory mode skips its own `*_redacted*` outputs and anything under `--out-dir`.
+- **`organizer-prompt.md` §3.1 / Step 6 / Failure modes**: batch is now the primary
+  path; added mandatory **manifest↔JSONL reconciliation** (any image with no record
+  → treat as OCR failure, never silently drop a page), stderr to a file (not
+  `/dev/null`), `/tmp/cb-v2-*` cleanup on completion, and corrected the NER-degraded
+  flag condition (`ner_requested && !ner_available`; `--no-ner` yields `null`).
+- **Mirror check**: LOCAL-ONLY — the cloud twin (`cancer-buddy-skill`) uses
+  Claude-vision OCR with no `redact_ocr.py`; no sibling change required.
+
 ## Unreleased — fix/x86-install-and-runtime-agnostic
 
 Fixes [#1](https://github.com/CancerDAO/cancer-buddy-organize-local-skill/issues/1)
