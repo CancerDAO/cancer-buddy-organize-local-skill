@@ -7,16 +7,19 @@
 
 `<patient_dir>/ocr/<basename>.md`，其中 `<basename>` = 重命名后的文件主名（不含扩展名）。
 
-例：`04_影像学/PET-CT/2026-01-09_PET-CT报告_宫颈癌,PET-CT,淋巴结转移.jpg` 对应 `ocr/2026-01-09_PET-CT报告_宫颈癌,PET-CT,淋巴结转移.md`
+例：`05_影像/PET-CT/2026-01-09_PET-CT报告_宫颈癌,PET-CT,淋巴结转移.jpg` 对应 `ocr/2026-01-09_PET-CT报告_宫颈癌,PET-CT,淋巴结转移.md`
 
 ## 完整 sidecar 结构
+
+> `MODALITY:` 是 `scheme_version: 3` 强制头部字段，描述数据本质（与临床域正交），ingest 解析分派按它走，不按桶（见 [`bucket-taxonomy.md`](bucket-taxonomy.md) §2 + [`ingest-adapters.md`](ingest-adapters.md)）。取值枚举：`text | image | structured | omics_raw | timeseries | binary_other`。
 
 ```markdown
 # <basename>
 
 > 原文件: `<original_name>` ｜ PII 遮挡: <N> 处 ｜ OCR 字符: <M>
 > SOURCE: <source_type> ｜ CONFIDENCE: <high|medium|low>
-> ORIGINAL: 10_原始文件/原始未遮挡/<basename>
+> MODALITY: <text|image|structured|omics_raw|timeseries|binary_other>
+> ORIGINAL: 90_原始文件镜像/<原始子目录>/<basename>
 > SHA256: <16-char prefix>
 
 ## 字符校正 (Layer 2 audit)
@@ -30,7 +33,8 @@
 
 ## 文档元数据 (Layer 2 写入)
 - type: PET-CT 报告
-- target_directory: 04_影像学/PET-CT/
+- target_directory: 05_影像/PET-CT/
+- modality: image
 - date: 2026-01-09
 - hospital: 西安交通大学医学院第一附属医院
 - summary: 宫颈癌患者 PET/CT 检查，宫颈及腹膜后、盆腔多发淋巴结代谢增高。
@@ -68,14 +72,29 @@
 | `admission_note` | 入院记录 / 入院小结 | high |
 | `imaging_report` | 影像学报告（含放射科签字）| high |
 | `lab_report` | 化验单（医院出具）| high |
-| `molecular_panel` | NGS / IHC / HPV 分型报告 | high |
+| `molecular_panel` | NGS / IHC / HPV 分型 / 胚系 / 组学报告 | high |
 | `prescription` | 处方笺 / 医嘱单 / 医保协议 | high |
 | `colposcopy` | 阴道镜检查报告（仅观察）| high |
 | `patient_note` | 患者拍照的检验单 / 报告（手机随手拍）| medium |
-| `patient_curated` | 09_患者补充/ 下的所有材料 | low |
-| `wechat_chat` | 09_患者补充/wechat/ 微信聊天截图 | low |
-| `voice_transcript` | 09_患者补充/voice_transcripts/ | low |
+| `patient_curated` | 14_患者自管补充/ 下的所有材料 | low |
+| `wechat_chat` | 14_患者自管补充/患者补充/ 微信聊天截图 | low |
+| `voice_transcript` | 14_患者自管补充/患者补充/ 语音转录 | low |
 | `handwritten_note` | 患者手写笔记 | low |
+
+### MODALITY (枚举，scheme_version 3 强制)
+
+描述源**数据本质**，与临床域正交，驱动 ingest 解析分派（见 [`bucket-taxonomy.md`](bucket-taxonomy.md) §2 + [`ingest-adapters.md`](ingest-adapters.md)）。
+
+| 值 | 含义 | 例 | ingest 路径 |
+|---|---|---|---|
+| `text` | prose / OCR 文档 | 出院小结、病理叙述 | LLM Markdown 转写 |
+| `image` | 影像 / 扫描，stub 摘要 | CT 序列、IHC 切片照 | LLM vision stub |
+| `structured` | 表格数值报告 | 血常规、生化面板 | LLM 表格 → Markdown 表 |
+| `omics_raw` | 原始组学载荷 | VCF / BAM / FASTQ / 表达矩阵 | omics ingest adapter |
+| `timeseries` | 纵向流 | 可穿戴导出、血糖日志、PRO 量表 | timeseries adapter → longitudinal_observations.json |
+| `binary_other` | 不支持/不透明二进制 | DICOM raw、专有导出 | stub + `[INGESTION_BLOCKED]`，永不静默丢弃 |
+
+一个源 = 一个桶文件 + 一个 modality；复合源（NGS 报告 PDF + 其 VCF）算两条记录（`text` 报告 → `06`，`omics_raw` VCF → `06`）。
 
 ### CONFIDENCE (枚举)
 
@@ -118,7 +137,7 @@ Layer 2 对桶 + 子桶分类决策的自评分（0-1）。
 
 - ≥ 0.7 → 子桶
 - 0.5–0.7 → 子桶 + readiness.warnings 加 `low_confidence_classification: <basename>`
-- < 0.5 → `10_原始文件/未分类/`
+- < 0.5 → `99_无关文件/uncertain/`
 
 ## 完整 example：PET/CT 报告
 
@@ -127,7 +146,8 @@ Layer 2 对桶 + 子桶分类决策的自评分（0-1）。
 
 > 原文件: `2026.1.9 PET:CT.jpg` ｜ PII 遮挡: 5 处 ｜ OCR 字符: 866
 > SOURCE: imaging_report ｜ CONFIDENCE: high
-> ORIGINAL: 10_原始文件/原始未遮挡/2026-01-09_PET-CT报告_宫颈癌,PET-CT,淋巴结转移.jpg
+> MODALITY: image
+> ORIGINAL: 90_原始文件镜像/<原始子目录>/2026-01-09_PET-CT报告_宫颈癌,PET-CT,淋巴结转移.jpg
 > SHA256: a4cda42e02a0bedc
 
 ## 字符校正 (Layer 2 audit)
@@ -141,7 +161,8 @@ Layer 2 对桶 + 子桶分类决策的自评分（0-1）。
 
 ## 文档元数据
 - type: PET-CT 报告
-- target_directory: 04_影像学/PET-CT/
+- target_directory: 05_影像/PET-CT/
+- modality: image
 - date: 2026-01-09
 - hospital: 西安交通大学医学院第一附属医院
 - summary: 宫颈癌患者 PET/CT 检查，宫颈及腹膜后、盆腔多发淋巴结代谢增高，提示肿瘤浸润及淋巴结转移。

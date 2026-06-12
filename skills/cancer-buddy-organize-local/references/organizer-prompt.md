@@ -29,7 +29,8 @@ Layer 3.5: patient_curated merge (auto-detected or --merge-into mode)
 
 - **Preserve source fidelity**. Never fabricate values. Unreadable → `null` (JSON) or `[OCR_UNCERTAIN]` (text).
 - **Surface uncertainty** via SOURCE / CONFIDENCE tags on every OCR sidecar.
-- **Respect 11-bucket + sub-bucket taxonomy**. Files MUST land in a sub-bucket — bucket-root is forbidden.
+- **Respect the 14 clinical domains (+2 infra) + sub-bucket taxonomy** (`scheme_version: 3`, see `../bucket-taxonomy.md`). Files MUST land in a sub-bucket — bucket-root is forbidden.
+- **Single classification axis = clinical domain** (modality-agnostic). Every filed source also carries a `modality` tag (`text|image|structured|omics_raw|timeseries|binary_other`, `bucket-taxonomy.md` §2) — set it in the sidecar `MODALITY:` header; ingest-parser dispatch reads `modality`, never the bucket (see `../ingest-adapters.md`).
 - **Idempotent re-runs**: never overwrite files in `<patient_dir>/` with lower mtime than source.
 - **Output pure JSON at the end** — all narrative goes into artifacts.
 - **review_flags audit is MANDATORY** — even if you find nothing, write `"review_flags": []`. Returning no `review_flags_total` field = non-compliance.
@@ -37,9 +38,11 @@ Layer 3.5: patient_curated merge (auto-detected or --merge-into mode)
 
 ## Reference documents (read these as you work)
 
-- `../document-taxonomy.md` — 11-bucket main taxonomy
-- `../subbucket-mapping.md` — sub-bucket decision tree + 09_患者补充 auto-detection
-- `../ocr-sidecar-template.md` — Layer 1+2 sidecar schema (must follow exactly)
+- `../bucket-taxonomy.md` — **authoritative** scheme_version 3 definition (14 clinical domains + 2 infra + modality tag + longitudinal store)
+- `../ingest-adapters.md` — per-modality ingestion (omics_raw / timeseries / binary_other adapters)
+- `../document-taxonomy.md` — document-type → clinical-domain 对照表
+- `../subbucket-mapping.md` — sub-bucket decision tree + 14_患者自管补充 auto-detection
+- `../ocr-sidecar-template.md` — Layer 1+2 sidecar schema (must follow exactly; includes MODALITY field)
 - `../review-flags-categories.md` — 6-class audit rules (Layer 3)
 - `../paddleocr-integration.md` — subprocess + venv + fallback rules
 
@@ -49,8 +52,26 @@ Layer 3.5: patient_curated merge (auto-detected or --merge-into mode)
 
 ```bash
 patient_dir="<patient_data_root>/<patient_code>"
-mkdir -p "$patient_dir"/{01_当前状态,01_当前状态/历史快照,02_诊断与分期,02_诊断与分期/病理报告,03_分子病理,03_分子病理/基因检测,03_分子病理/免疫组化,03_分子病理/HPV分型,04_影像学,04_影像学/CT,04_影像学/MRI,04_影像学/PET-CT,04_影像学/超声,04_影像学/X光DR,04_影像学/其他,05_检验检查,05_检验检查/血常规,05_检验检查/生化肝肾功,05_检验检查/肿瘤标志物,05_检验检查/凝血,05_检验检查/免疫,05_检验检查/淋巴亚群,05_检验检查/甲功,05_检验检查/性激素,05_检验检查/心脏标志物,05_检验检查/其他,06_治疗记录,06_治疗记录/化疗,06_治疗记录/放疗,06_治疗记录/免疫治疗,06_治疗记录/靶向,06_治疗记录/手术-内镜,06_治疗记录/支持治疗,07_合并症与用药,08_出院小结,08_出院小结/入院小结,09_患者补充,09_患者补充/manual_timeline,09_患者补充/wechat,09_患者补充/voice_transcripts,09_患者补充/handwritten,10_原始文件,10_原始文件/原始未遮挡,10_原始文件/_duplicates,10_原始文件/未分类,11_诊断证明,ocr}
+# scheme_version 3 — 14 clinical domains (01_…14_) + 2 infra (90_/99_)。子桶清单 = ../subbucket-mapping.md (= bucket-taxonomy.md §1.1)。
+mkdir -p "$patient_dir"/{\
+01_身份与基础信息/身份证件,01_身份与基础信息/人口学,01_身份与基础信息/参保信息,\
+02_既往史与家族史/既往病史,02_既往史与家族史/手术史,02_既往史与家族史/过敏史,02_既往史与家族史/用药史,02_既往史与家族史/家族史,02_既往史与家族史/胚系遗传,\
+03_病程与叙事文书/入院记录,03_病程与叙事文书/出院小结,03_病程与叙事文书/病程记录,03_病程与叙事文书/门诊病历,03_病程与叙事文书/主诉首程,\
+04_诊断与分期/病理报告,04_诊断与分期/诊断证明,04_诊断与分期/分期评估,04_诊断与分期/其他,\
+05_影像/CT,05_影像/MRI,05_影像/PET-CT,05_影像/超声,05_影像/X光DR,05_影像/核医学,05_影像/内镜影像,05_影像/其他,\
+06_分子与组学/NGS报告,06_分子与组学/免疫组化,06_分子与组学/胚系检测,06_分子与组学/WES-WGS,06_分子与组学/转录组,06_分子与组学/甲基化,06_分子与组学/蛋白-代谢,06_分子与组学/微生物组,06_分子与组学/其他,\
+07_检验/血常规,07_检验/生化肝肾功,07_检验/肿瘤标志物,07_检验/凝血,07_检验/尿便,07_检验/其他,\
+08_治疗/化疗,08_治疗/放疗,08_治疗/免疫治疗,08_治疗/靶向,08_治疗/内分泌,08_治疗/中医中药,08_治疗/处方医嘱,08_治疗/支持治疗,\
+09_手术与操作/手术记录,09_手术与操作/麻醉记录,09_手术与操作/介入,09_手术与操作/内镜操作,09_手术与操作/植入物-器械卡,\
+10_随访与监测/随访复查,10_随访与监测/可穿戴导出,10_随访与监测/PRO自报,10_随访与监测/居家监测,\
+11_会诊与转诊/MDT,11_会诊与转诊/会诊,11_会诊与转诊/转诊,11_会诊与转诊/第二意见,\
+12_心理社会与支持/心理评估,12_心理社会与支持/营养,12_心理社会与支持/康复,12_心理社会与支持/缓和,12_心理社会与支持/社工,\
+13_行政与财务/知情同意,13_行政与财务/费用发票,13_行政与财务/医保报销,13_行政与财务/证明材料,\
+14_患者自管补充/患者补充,14_患者自管补充/日记,14_患者自管补充/自测,14_患者自管补充/conversation_notes,\
+90_原始文件镜像,90_原始文件镜像/_duplicates,99_无关文件/high_confidence,99_无关文件/uncertain,ocr}
 ```
+
+> `90_原始文件镜像` (HIDDEN) = 字节级审计镜像，永不患者可见 / 永不锚定 — 脱敏 job 在此就地替换图片，`<原始子目录>/` 结构保留。`99_无关文件` (quarantine) = 相关性隔离区，下游不读。两者都在临床 `01…14` 域之外。
 
 ### 1.2 Detect mode
 
@@ -102,7 +123,7 @@ unpack_archive.py 检测到非 ASCII 文件名时**自动 flatten** 为 `0001.jp
 find "$src" -type f \( -name "*.pdf" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" -o -name "*.tif" -o -name "*.tiff" -o -name "*.webp" -o -name "*.docx" -o -name "*.xlsx" -o -name "*.txt" -o -name "*.md" \) ! -name ".*"
 ```
 
-**自动检测 09_患者补充 候选**（来自 [`../subbucket-mapping.md`](../subbucket-mapping.md) §3）：
+**自动检测 14_患者自管补充 候选**（来自 [`../subbucket-mapping.md`](../subbucket-mapping.md) §3）：
 
 ```bash
 # manual timeline 候选
@@ -115,7 +136,7 @@ find "$src" -type f \( -name "*.pdf" -o -name "*.jpg" -o -name "*.jpeg" -o -name
 *handwritten* | *手写* (照片含亲属称谓如 "我"/"妈"/"爸")
 ```
 
-例外：`微信图片_2026-02-20_175946.jpg` 这种纯时间戳的微信下载图片**不算** 09_患者补充（通常是医院 jpg 截图）— 按内容判桶。
+例外：`微信图片_2026-02-20_175946.jpg` 这种纯时间戳的微信下载图片**不算** 14_患者自管补充（通常是医院 jpg 截图）— 按内容判桶。
 
 ### 2.3 SHA256 去重预扫
 
@@ -136,13 +157,13 @@ done < /tmp/cb-v2-input-files.txt
 echo "Hashes computed: $(wc -l < /tmp/cb-v2-hashes.tsv) / $(wc -l < /tmp/cb-v2-input-files.txt)"
 
 # 去重: 同 hash 第二个起进 _duplicates/, 唯一集进 /tmp/cb-v2-unique-files.txt
-mkdir -p "$patient_dir/10_原始文件/_duplicates"
+mkdir -p "$patient_dir/90_原始文件镜像/_duplicates"
 > /tmp/cb-v2-unique-files.txt
 > /tmp/cb-v2-dup-files.txt
 declare -A seen
 while IFS=$'\t' read -r h f; do
   if [ -n "${seen[$h]+_}" ]; then
-    cp "$f" "$patient_dir/10_原始文件/_duplicates/" 2>/dev/null
+    cp "$f" "$patient_dir/90_原始文件镜像/_duplicates/" 2>/dev/null
     echo "$f -> ${seen[$h]}" >> /tmp/cb-v2-dup-files.txt
   else
     seen[$h]="$f"
@@ -183,7 +204,7 @@ echo "Unique: $(wc -l < /tmp/cb-v2-unique-files.txt) | Duplicates: $(wc -l < /tm
 
 stdout JSON: `{"success": bool, "ocr_text_safe": str, "pii_detected": int, "regions": [...]}`
 
-- `success: true` → 字节级复制原文件到 `10_原始文件/原始未遮挡/<basename>` (字节级镜像，未脱敏)
+- `success: true` → 字节级复制原文件到 `90_原始文件镜像/<原始子目录>/<basename>` (字节级镜像，未脱敏，保留原始子目录结构)
 - `success: false` 或 timeout → 标记降级到 Layer 2 (Claude vision)，写 readiness.warnings: `paddle_ocr_failed: <basename>`
 
 ### 3.2 PDF
@@ -227,7 +248,8 @@ PDF 内含图片型扫描页 → extract_pdf.py 内部自动调 redact_ocr.py，
 
 ```json
 {
-  "target_directory": "04_影像学/PET-CT",
+  "target_directory": "05_影像/PET-CT",
+  "modality": "image",
   "doc_type": "PET-CT 报告",
   "date": "2026-01-09",
   "hospital": "西安交通大学医学院第一附属医院",
@@ -246,7 +268,7 @@ PDF 内含图片型扫描页 → extract_pdf.py 内部自动调 redact_ocr.py，
 `classification_confidence`：
 - ≥ 0.7 → 进目标子桶
 - 0.5-0.7 → 子桶 + readiness.warnings 加 `low_confidence_classification: <basename>`
-- < 0.5 → `10_原始文件/未分类/`
+- < 0.5 → `99_无关文件/uncertain/`
 
 ### 4.3 字符校正（Layer 2 audit）
 
@@ -266,7 +288,7 @@ reason 限定为：
 
 ### 4.4 PII 二次脱敏复查（**v2.1 强制 — 这是 skill 的最大设计前提**）
 
-**核心约束**：sidecar 里**不允许出现任何明文 PII**。原始未脱敏只许放在 `10_原始文件/原始未遮挡/`。
+**核心约束**：sidecar 里**不允许出现任何明文 PII**。原始未脱敏只许放在 `90_原始文件镜像/`。
 
 **必须脱敏的 PII 类型**（不只是 PaddleNLP NER 漏检，而是 sidecar 里**全部都要脱敏**）：
 
@@ -324,7 +346,8 @@ fi
 
 > 原文件: `<original>` ｜ PII 遮挡: <N> 处 ｜ OCR 字符: <M>
 > SOURCE: <source_type> ｜ CONFIDENCE: <high|medium|low>
-> ORIGINAL: 10_原始文件/原始未遮挡/<basename>
+> MODALITY: <text|image|structured|omics_raw|timeseries|binary_other>
+> ORIGINAL: 90_原始文件镜像/<原始子目录>/<basename>
 > SHA256: <16-char prefix>
 
 ## 字符校正 (Layer 2 audit)
@@ -336,6 +359,7 @@ fi
 ## 文档元数据
 - type: <doc_type>
 - target_directory: <bucket/subbucket>
+- modality: <modality>
 - date: YYYY-MM-DD
 - hospital: <name>
 - summary: <≤80字>
@@ -365,8 +389,10 @@ fi
 ```bash
 # 已遮挡版本进子桶 — 用原始 basename，等 §4.9 record_namer 算出 canonical 名再统一改
 cp "$layer1_redacted_or_original" "$patient_dir/$target_directory/$(basename "$original_file")"
-# 字节级原件进未遮挡镜像（保留原始 basename — 字节级镜像不能改名）
-cp "$original_file" "$patient_dir/10_原始文件/原始未遮挡/$(basename "$original_file")"
+# 字节级原件进 90_原始文件镜像（HIDDEN，保留原始子目录 + 原始 basename — 字节级镜像不能改名）
+# rel = 原始文件相对 $src 的子目录路径，保留 <原始子目录>/ 结构（bucket-taxonomy.md §1.2）
+rel="$(dirname "${original_file#$src/}")"; mkdir -p "$patient_dir/90_原始文件镜像/$rel"
+cp "$original_file" "$patient_dir/90_原始文件镜像/$rel/$(basename "$original_file")"
 ```
 
 **重要**：不要在这里用 `${date}_${doc_type}_${brief_desc}` 拼文件名。prompt 级的命名拼接对缺日期 / 非法字符 / 机构提取优先级 / 冲突后缀都没兜底，是已知失败模式（见 2026-05-18 反馈与 PRD §6.B）。canonical 命名必须由 §4.9 的 `record_namer.py` 统一处理。
@@ -386,20 +412,20 @@ jq -nc \
 
 ### 4.7 ★ 原始文件名映射（**v2.1 新增 — 处理非 ASCII 文件名**）
 
-`10_原始文件/原始未遮挡/` 必须保留**原始 basename**（字节级镜像原则）。但当源文件名包含非 ASCII 字符（中文、格鲁吉亚文、阿拉伯文、Cyrillic、emoji 等）时，macOS Finder 渲染可能失败，显示成空字符或乱码。
+`90_原始文件镜像/` 必须保留**原始 basename**（字节级镜像原则）。但当源文件名包含非 ASCII 字符（中文、格鲁吉亚文、阿拉伯文、Cyrillic、emoji 等）时，macOS Finder 渲染可能失败，显示成空字符或乱码。
 
-**强制**：在 `10_原始文件/原始未遮挡/` 写入一个 `_FILENAME_MAPPING.md`，列出原文件名 → 桶里规范文件名的对照：
+**强制**：在 `90_原始文件镜像/` 写入一个 `_FILENAME_MAPPING.md`，列出原文件名 → 桶里规范文件名的对照：
 
 ```markdown
-# Filename Mapping — 原始未遮挡 ↔ Canonical Buckets
+# Filename Mapping — 90_原始文件镜像 ↔ Canonical Buckets
 
 > 原始文件名保留作字节级审计追溯。Finder 渲染异常或中文/非 ASCII 字符可能显示为空 — 用本表反查。
 
 | 原始文件名 (raw bytes) | SHA256 prefix | 规范化文件名 | 所在桶 |
 |---|---|---|---|
-| `Tamar_Gogodze_PET_CT_English_Translation_2026-05-04.pdf` | `a1b2c3d4...` | `2026-05-04_PET-CT_PDAC-mixed-response.pdf` | `04_影像学/PET-CT/` |
-| `<格鲁吉亚文>md.pdf` | `e5f6a7b8...` | `2026-04-27_lab_CA19-9-CEA-VitD-B12-TSH-folate.pdf` | `05_检验检查/肿瘤标志物/` |
-| `Gogodze ET. histological report-EN.docx` | `c9d0e1f2...` | `2026-03-18_pathology_paraaortic-LN-PDAC-mets.docx` | `02_诊断与分期/病理报告/` |
+| `Tamar_Gogodze_PET_CT_English_Translation_2026-05-04.pdf` | `a1b2c3d4...` | `2026-05-04_PET-CT_PDAC-mixed-response.pdf` | `05_影像/PET-CT/` |
+| `<格鲁吉亚文>md.pdf` | `e5f6a7b8...` | `2026-04-27_lab_CA19-9-CEA-VitD-B12-TSH-folate.pdf` | `07_检验/肿瘤标志物/` |
+| `Gogodze ET. histological report-EN.docx` | `c9d0e1f2...` | `2026-03-18_pathology_paraaortic-LN-PDAC-mets.docx` | `04_诊断与分期/病理报告/` |
 ```
 
 生成方式：
@@ -413,7 +439,7 @@ jq -nc \
     while IFS=$'\t' read -r orig canonical bucket sha; do
         printf "| \`%s\` | \`%s\` | \`%s\` | \`%s\` |\n" "$orig" "$sha" "$canonical" "$bucket"
     done < /tmp/cb-v2-mapping.tsv
-} > "$patient_dir/10_原始文件/原始未遮挡/_FILENAME_MAPPING.md"
+} > "$patient_dir/90_原始文件镜像/_FILENAME_MAPPING.md"
 ```
 
 `/tmp/cb-v2-mapping.tsv` 在 §4.6 重命名时同步追加每条记录。
@@ -427,20 +453,20 @@ jq -nc \
 find "$patient_dir" -type d -empty -mindepth 2 -maxdepth 3 > /tmp/cb-v2-empty-dirs.txt
 
 # 永远保留的空骨架（即使为空也要在）：
-# - 09_患者补充/manual_timeline 等子桶（下游 cancer-buddy / firefly 可能会写）
-# - 10_原始文件/_duplicates（去重不一定有内容）
-# - 10_原始文件/未分类（兜底桶）
-# - 11_诊断证明（残疾证 / 大病证明，常见但非每例必有）
+# - 14_患者自管补充/* 子桶（下游 cancer-buddy / firefly 可能会写）
+# - 90_原始文件镜像/_duplicates（去重不一定有内容）
+# - 99_无关文件/uncertain（兜底桶）
+# - 04_诊断与分期/诊断证明（残疾证 / 大病证明，常见但非每例必有）
 
 KEEP_EMPTY=(
-    "09_患者补充/manual_timeline"
-    "09_患者补充/wechat"
-    "09_患者补充/voice_transcripts"
-    "09_患者补充/handwritten"
-    "09_患者补充"
-    "10_原始文件/_duplicates"
-    "10_原始文件/未分类"
-    "11_诊断证明"
+    "14_患者自管补充/患者补充"
+    "14_患者自管补充/日记"
+    "14_患者自管补充/自测"
+    "14_患者自管补充/conversation_notes"
+    "14_患者自管补充"
+    "90_原始文件镜像/_duplicates"
+    "99_无关文件/uncertain"
+    "04_诊断与分期/诊断证明"
 )
 
 while IFS= read -r d; do
@@ -452,11 +478,11 @@ while IFS= read -r d; do
     [ $keep -eq 0 ] && rmdir "$d" 2>/dev/null
 done < /tmp/cb-v2-empty-dirs.txt
 
-# 第二轮：删空了之后，可能父桶也空了 — 再扫一遍但要保留 11 个一级桶
-find "$patient_dir" -type d -empty -mindepth 2 -maxdepth 2 ! -name "09_患者补充" ! -name "10_原始文件" ! -name "11_诊断证明" -exec rmdir {} + 2>/dev/null
+# 第二轮：删空了之后，可能父桶也空了 — 再扫一遍但要保留兜底一级桶
+find "$patient_dir" -type d -empty -mindepth 2 -maxdepth 2 ! -name "14_患者自管补充" ! -name "90_原始文件镜像" ! -name "99_无关文件" -exec rmdir {} + 2>/dev/null
 ```
 
-**特别提示**：宫颈癌相关的 `03_分子病理/HPV 分型/` 子桶 — 对非宫颈/口咽癌患者直接删；同理 `05_检验检查/淋巴亚群、性激素、心脏标志物` 等只对特定癌种相关的子桶，没装东西就删。
+**特别提示**：宫颈癌相关的 HPV 分型（`06_分子与组学/其他/`）— 对非宫颈/口咽癌患者直接删；同理 `07_检验/其他/` 下的淋巴亚群 / 性激素 / 心脏标志物类、`08_治疗/内分泌/` 等只对特定癌种相关的子桶，没装东西就删。
 
 最终 `find $patient_dir -type d` 出来的目录树应该**只反映这位患者实际有的桶**，不是骨架模板。
 
@@ -538,7 +564,7 @@ done < <(jq -c '.file_renames[]' "$patient_dir/.rename_plan.json")
 - `source_manifest.tsv`（若已存在）：path 列改写为 canonical basename；保留 `original_basename` 列作审计追溯
 - `_FILENAME_MAPPING.md`（§4.7）：每行的"规范化文件名"列改为 plan 的 `new_basename`
 - 每个被改名的 `ocr/*.md` 内部 `SOURCE:` header：旧 basename → 新 basename
-- `10_原始文件/原始未遮挡/` 字节级镜像**不动**（保留原始 basename）
+- `90_原始文件镜像/` 字节级镜像**不动**（保留原始 basename）
 
 **Idempotency**：`mv -n` 拒绝覆盖。文件已经是 canonical 名就 no-op。
 
@@ -563,7 +589,9 @@ fi
 
 ### 5.1 写 case_text.md
 
-读所有 ocr/*.md，按规范顺序拼接：基本信息 → 当前状态 → 诊断与分期 → 病理 → 影像 → 分子检测 → 治疗记录 → 检验 → 手术 → 会诊 → 其他
+读所有 ocr/*.md，按规范顺序拼接：身份与基础信息 → 既往史与家族史 → 病程与叙事文书 → 诊断与分期 → 影像 → 分子与组学 → 检验 → 治疗 → 手术与操作 → 随访与监测 → 会诊与转诊 → 心理社会与支持 → 患者自管补充
+
+> 注：「当前状态」是综合输出，已写进 profile.json + case_text.md，不是桶（v3 移除了原 01_当前状态 桶）。
 
 每节头部：
 ```
@@ -608,7 +636,7 @@ SOURCE: pathology_report | CONFIDENCE: high
   "disclosure_state": null,
   "disclosure_history": [],
   "patient_curated_sources": [           // ★ v2 新增
-    {"path": "09_患者补充/manual_timeline/...", "encoding": "utf-16-le", "confidence": "low"}
+    {"path": "14_患者自管补充/患者补充/...", "encoding": "utf-16-le", "confidence": "low"}
   ],
   "duplicate_count": 0                    // ★ v2 新增
 }
@@ -688,7 +716,7 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 3. `clinical_logic_anomaly` — 术语用错语境
 4. `unverified_critical_field` — 关键字段仅来自 progress note
 5. `value_trend_anomaly` — 数值时序非生理性
-6. `patient_curated_vs_formal` ★ v2 新增 — 09_患者补充 vs 02-08/11 冲突
+6. `patient_curated_vs_formal` — 14_患者自管补充 vs 01–13 正式文档冲突
 
 每条 flag 必填字段（见 review-flags-categories.md §schema）：
 ```json
@@ -748,7 +776,7 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 - ...
 
 ## 文档索引
-### 02_诊断与分期/...
+### 04_诊断与分期/...
 - [<file>](路径) 🔒 — <summary>
 
 (略...)
@@ -758,11 +786,11 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 
 **触发条件**：
 - `mode == merge_only`，OR
-- Step 2.2 检测到 09_患者补充 候选文件
+- Step 2.2 检测到 14_患者自管补充 候选文件
 
 ### 5.5.1 解码 patient_curated 文件
 
-- `*.txt` 自动检测 encoding (utf-8 / utf-16-le / gb18030)，转 utf-8 存到 09_患者补充/manual_timeline/
+- `*.txt` 自动检测 encoding (utf-8 / utf-16-le / gb18030)，转 utf-8 存到 14_患者自管补充/患者补充/
 - 微信导出 .html / .json → 解析提取消息文本
 - 语音转录 → 直接当 .txt
 
@@ -771,7 +799,7 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 每条 patient_curated 数据：
 - SOURCE: `patient_curated`
 - CONFIDENCE: `low`
-- 进 09_患者补充/<sub-bucket>/
+- 进 14_患者自管补充/<sub-bucket>/
 
 ### 5.5.3 跑 cross-validation
 
@@ -829,7 +857,7 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 
 1. **NEVER fabricate** medical facts. Unreadable → `null` / `[OCR_UNCERTAIN]`.
 2. **NEVER overwrite** `<patient_dir>/` files with lower mtime than source (idempotent).
-3. **`10_原始文件/原始未遮挡/`** 必须是字节级镜像 — 永远本地审计 only。
+3. **`90_原始文件镜像/`** 必须是字节级镜像 — 永远本地审计 only。
 4. **SOURCE / CONFIDENCE tags** mandatory on every sidecar — 下游 skill 拒绝读取无标签 sidecar.
 5. **review_flags audit MANDATORY** — 即使空数组也要写。
 6. **Output JSON only at end** — narrative goes in artifacts.
@@ -837,10 +865,10 @@ Grade 映射: A ≥ 0.90, B ≥ 0.75, C ≥ 0.60, D ≥ 0.40, F < 0.40.
 8. **No semantic rewriting** in 字符校正 — 只改 OCR 错字，不改"含义"。
 9. **每个 Bash 命令同步阻塞执行**：不用 Monitor，不写 `until` polling 循环，不用 `&` 后台，每个命令必须自己跑完退出。否则父 stream 必 timeout。
 10. **每个 Bash 命令前置定义所有变量**：`$patient_dir`、`$src`、`$paddle_python` 等每次都要 redeclare（每次 Bash call 是新 shell，环境不持久）。
-11. **★ PII 在 sidecar 里必须脱敏**（v2.1 新增）：sidecar 不允许出现患者真名 / DOB / 国民编号 / 病案号；§4.4 的 grep verification 必须跑且 pass。原始未脱敏数据只许在 `10_原始文件/原始未遮挡/`。违反此规则下游 vMTB 报告会带 PII 出去，无法发给 sponsor。
+11. **★ PII 在 sidecar 里必须脱敏**（v2.1 新增）：sidecar 不允许出现患者真名 / DOB / 国民编号 / 病案号；§4.4 的 grep verification 必须跑且 pass。原始未脱敏数据只许在 `90_原始文件镜像/`。违反此规则下游 vMTB 报告会带 PII 出去，无法发给 sponsor。
 12. **★ PMH 不放化验异常**（v2.1 新增）：`key_comorbidities[]` 只放医生**诊断的**疾病，不放 borderline lab 异常（HbA1c 5.8% / Vit D 12 / TSH 4.79+normal T4 等）。这些只在 case_text.md 化验段记录。违反此规则下游 oncologist agent 会输出冗余的"建议监测/会诊"推荐污染 MTB。详见 §5.2.1。
-13. **★ 空子桶清理**（v2.1 新增）：Layer 2 完成后必须跑 §4.8 的清理。`HPV 分型/`（宫颈/口咽癌）/ `淋巴亚群/`（血液病/移植后）/ `性激素/`（妇科 / 内分泌）这些癌种特异桶，没装东西就删。否则 INDEX 索引看上去乱、用户也会困惑为什么 PDAC 患者目录里有 HPV 分型。
-14. **★ 文件名映射**（v2.1 新增）：`10_原始文件/原始未遮挡/_FILENAME_MAPPING.md` 必须生成 — 即使所有原始文件名都是 ASCII。这是字节级镜像 ↔ 桶里规范文件名的唯一审计反查表。
+13. **★ 空子桶清理**（v2.1 新增）：Layer 2 完成后必须跑 §4.8 的清理。HPV 分型（`06_分子与组学/其他/`，宫颈/口咽癌）/ `07_检验/其他/` 下的淋巴亚群（血液病/移植后）/ 性激素（妇科 / 内分泌）/ `08_治疗/内分泌/` 这些癌种特异桶，没装东西就删。否则 INDEX 索引看上去乱、用户也会困惑为什么 PDAC 患者目录里有 HPV 分型。
+14. **★ 文件名映射**（v2.1 新增）：`90_原始文件镜像/_FILENAME_MAPPING.md` 必须生成 — 即使所有原始文件名都是 ASCII。这是字节级镜像 ↔ 桶里规范文件名的唯一审计反查表。
 15. **★ patient_code 不允许真名**（v2.1 新增）：默认必须是 `PT-<10 hex>` 格式。`--alias` 接受真名是 escape hatch，但**调用时必须警告用户**："patient_code 会出现在所有路径 / 下游报告 / 文件系统 — 用真名意味着 PII 直接暴露在文件系统层"。生产数据应一律用 `PT-<hex>`。
 
 ## Call parameters

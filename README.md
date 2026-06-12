@@ -80,8 +80,8 @@ Claude Code 会优先路由到 `cancer-buddy-organize-local`（如果同时装�
 输出与默认 organize 完全一样的 `patients/<patient_code>/` 目录结构，再加：
 
 - `ocr/<basename>.md` — 每个图片一份，含 SOURCE / CONFIDENCE / 字符校正 / 双层 PII 脱敏 / 正文润色版
-- `09_患者补充/` — 手写 timeline / 微信 / 语音转录 的 patient_curated 合并通道
-- `10_原始文件/原始未遮挡/` — 字节级镜像，PII 未脱敏，**仅本地审计**，下游 skill 永远只读脱敏版
+- `14_患者自管补充/` — 手写 timeline / 微信 / 语音转录 的 patient_curated 合并通道
+- `90_原始文件镜像/` — HIDDEN 字节级镜像（保留原始子目录结构），PII 未脱敏，**仅本地审计**，永不患者可见，下游 skill 永远只读脱敏版
 
 ---
 
@@ -94,7 +94,7 @@ Claude Code 会优先路由到 `cancer-buddy-organize-local`（如果同时装�
 - `references/roles.md`
 - `references/profile-card.md`
 - review_flags 类别（默认 5 类 / local 6 类，扩展时需对齐）
-- 11 桶 + 子桶分类法
+- bucket taxonomy（`scheme_version: 3` — 14 临床域 + 2 infra + modality 标签 + 纵向流；权威定义 `skills/cancer-buddy-organize-local/references/bucket-taxonomy.md`）
 - `readiness.json` 8 域评分定义
 
 如果你发了一个 PR 只改了一边，另一边的 maintainer 会 ping 你同步。两仓 schema 漂移会让下游 `cancer-buddy-vault` / `cancerdao-vmtb` / `cancer-buddy-trial-match` 直接坏掉。
@@ -119,12 +119,16 @@ cancer-buddy-organize-local-skill/
         ├── SKILL.md                          # skill 入口（Claude Code 会读这个）
         ├── SPEC.md                           # 完整设计 + 决策 + 验收
         ├── references/                       # 本 skill 私有引用
-        │   ├── document-taxonomy.md          # 11 桶分类法
-        │   ├── subbucket-mapping.md          # 子桶 + 09_患者补充 检测
-        │   ├── ocr-sidecar-template.md       # Layer 1+2 sidecar schema
+        │   ├── bucket-taxonomy.md            # ★ 权威 scheme_version 3 桶定义（14 临床域 + 2 infra）
+        │   ├── ingest-adapters.md            # 按 modality 的 ingest 适配器
+        │   ├── document-taxonomy.md          # 文档类型 → 临床域 对照表
+        │   ├── subbucket-mapping.md          # 子桶 + 14_患者自管补充 检测
+        │   ├── ocr-sidecar-template.md       # Layer 1+2 sidecar schema（含 MODALITY 字段）
         │   ├── review-flags-categories.md    # 6 类审计规则
         │   ├── paddleocr-integration.md      # subprocess + venv + fallback
-        │   └── organizer-prompt.md           # subagent 主提示词
+        │   ├── organizer-prompt.md           # subagent 主提示词
+        │   └── schemas/
+        │       └── longitudinal_observations.schema.json  # 纵向流观测值 store schema
         └── scripts/                          # 本地 Python 工具（subprocess 调用）
             ├── redact_ocr.py                 # PaddleOCR + NER PII 双层脱敏
             ├── extract_pdf.py
@@ -152,7 +156,7 @@ $HOME/CancerDAO/patients/
 - 本工具不提供医疗诊断或治疗建议——所有医疗决策需与专业医生确认
 - PaddleOCR 中文模型对手写 / 印章 / 严重模糊文档准确率有限，本 skill 在这些场景会自动 fallback 到 Claude vision（你可以通过 paddleocr-integration.md 调整阈值）
 - 字符校正只能改 OCR 错字，**禁止**做语义改写
-- 10_原始文件/原始未遮挡/ 是字节级镜像——永远本地 only，不要 commit 到任何 git 仓
+- 90_原始文件镜像/ 是 HIDDEN 字节级镜像——永远本地 only，永不患者可见，不要 commit 到任何 git 仓
 
 ---
 

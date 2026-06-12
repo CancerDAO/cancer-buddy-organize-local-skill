@@ -24,7 +24,7 @@ Turn raw patient files (folder / archive / single doc) into a canonical patient 
 | profile.json 厚度 | ✅ 48 字段 + irAE 时序 | ⚠️ 11 字段 mostly null | 沿用 v1 |
 | timeline.md | ✅ 临床事件流 | ⚠️ 文件清单 | 沿用 v1 |
 | review_flags 五类审计 | ✅ | ❌ | 沿用 v1 |
-| 子桶分类 | 平铺 11 桶 | ✅ 子桶细分 | 沿用 mtb-core |
+| 子桶分类 | 平铺 11 桶（旧） | ✅ 子桶细分 | 沿用 mtb-core |
 | 文档去重 | ⚠️ 部分 | ⚠️ 同一份 MRI 进 2 次 | **v2 新增** |
 | 患者补充材料 merge | ❌ | ❌ | **v2 新增** |
 | readiness schema | 8 域 schema_v1 ✅ | 7 模块独立 | 沿用 v1 |
@@ -38,7 +38,7 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
     │       · subprocess 调 scripts/redact_ocr.py (vendored)
     │       · 图片 → ocr/<basename>.md (含字符校正 + PII 遮挡 + bbox)
     │       · PDF/DOCX/XLSX → 纯文本提取 (extract_pdf/docx/excel.py)
-    │       · 输出双副本: 10_原始文件/原始未遮挡/ + 10_原始文件/<bucket>/
+    │       · 输出双副本: 90_原始文件镜像/<原始子目录>/ (字节级镜像) + <临床域桶>/<子桶>/ (脱敏分类副本)
     │
     ├─► [Layer 2] 临床分类与归档 (Claude vision + 子桶映射)
     │       · 读 ocr/<basename>.md 的 OCR 文本 + 必要时回看图片
@@ -57,7 +57,7 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
     └─► [Layer 3.5] 患者补充材料 merge (可选, 第二轮入口)
             · 输入: manual_timeline.txt / 微信导出 / 医生口述音频转录
             · 标记 SOURCE: patient_curated, CONFIDENCE: low
-            · 进 09_患者补充/, 同时 update profile.json + timeline.md (patient_curated 字段)
+            · 进 14_患者自管补充/, 同时 update profile.json + timeline.md (patient_curated 字段)
             · review_flags 增补 cross_doc_contradiction 检查 (与正式文档冲突点)
 ```
 
@@ -72,31 +72,44 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 ├── review_flags.md           # 待人工确认清单 (review_flags 非空时生成)
 ├── case_text.md              # 整合叙事
 │
-├── 01_当前状态/
-├── 02_诊断与分期/
-│   └── 病理报告/
-├── 03_分子病理/
-│   ├── 基因检测/
-│   ├── 免疫组化/
-│   └── HPV 分型/
-├── 04_影像学/
-│   ├── CT/        MRI/        PET-CT/        超声/        X光DR/        其他/
-├── 05_检验检查/
-│   ├── 血常规/    生化肝肾功/    肿瘤标志物/    凝血/    免疫/    淋巴亚群/    甲功/    其他/
-├── 06_治疗记录/
-│   ├── 化疗/      放疗/      免疫治疗/      靶向/      手术-内镜/      支持治疗/
-├── 07_合并症与用药/
-├── 08_出院小结/
-│   └── 入院记录/
-├── 09_患者补充/                # ★ v2 新增 — Layer 3.5 入口
-│   ├── manual_timeline.txt
-│   ├── wechat_chat_excerpts.md
-│   └── voice_transcripts/
-├── 10_原始文件/                # 字节级镜像 + 去重副本
-│   ├── 原始未遮挡/             # PII 未脱敏的全镜像 (审计用, 本地)
-│   └── _duplicates/            # 哈希同源被去重的副本
-├── 11_诊断证明/
+│                              # scheme_version 3 — 14 临床域 (+2 infra)；权威定义见 references/bucket-taxonomy.md §1
+├── 01_身份与基础信息/
+│   └── 身份证件/  人口学/  参保信息/
+├── 02_既往史与家族史/
+│   └── 既往病史/  手术史/  过敏史/  用药史/  家族史/  胚系遗传/
+├── 03_病程与叙事文书/
+│   └── 入院记录/  出院小结/  病程记录/  门诊病历/  主诉首程/
+├── 04_诊断与分期/
+│   └── 病理报告/  诊断证明/  分期评估/  其他/
+├── 05_影像/
+│   └── CT/  MRI/  PET-CT/  超声/  X光DR/  核医学/  内镜影像/  其他/
+├── 06_分子与组学/
+│   └── NGS报告/  免疫组化/  胚系检测/  WES-WGS/  转录组/  甲基化/  蛋白-代谢/  微生物组/  其他/
+├── 07_检验/
+│   └── 血常规/  生化肝肾功/  肿瘤标志物/  凝血/  尿便/  其他/
+├── 08_治疗/
+│   └── 化疗/  放疗/  免疫治疗/  靶向/  内分泌/  中医中药/  处方医嘱/  支持治疗/
+├── 09_手术与操作/
+│   └── 手术记录/  麻醉记录/  介入/  内镜操作/  植入物-器械卡/
+├── 10_随访与监测/
+│   └── 随访复查/  可穿戴导出/  PRO自报/  居家监测/
+├── 11_会诊与转诊/
+│   └── MDT/  会诊/  转诊/  第二意见/
+├── 12_心理社会与支持/
+│   └── 心理评估/  营养/  康复/  缓和/  社工/
+├── 13_行政与财务/
+│   └── 知情同意/  费用发票/  医保报销/  证明材料/
+├── 14_患者自管补充/             # ★ Layer 3.5 入口
+│   └── 患者补充/  日记/  自测/  conversation_notes/
 │
+├── 90_原始文件镜像/             # ★ HIDDEN — 字节级镜像 (保留 <原始子目录>/) + 去重副本，永不患者可见 / 永不锚定
+│   ├── <原始子目录>/           # PII 未脱敏的全镜像 (审计用, 本地)；脱敏 job 在此就地替换图片
+│   └── _duplicates/            # 哈希同源被去重的副本
+├── 99_无关文件/                # ★ HIDDEN (quarantine) — 相关性隔离区
+│   ├── high_confidence/
+│   └── uncertain/
+│
+├── longitudinal_observations.json  # ★ scheme_version 3 — 纵向流观测值 store (timeseries / 趋势 structured)
 └── ocr/                        # 每个图片/PDF 对应一个 sidecar
     └── <basename>.md
 ```
@@ -108,7 +121,8 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 
 > 原文件: `<original_name>` ｜ PII 遮挡: <N> 处 ｜ OCR 字符: <M>
 > SOURCE: <source_type> ｜ CONFIDENCE: <high|medium|low>
-> ORIGINAL: 10_原始文件/原始未遮挡/<basename>
+> MODALITY: <text|image|structured|omics_raw|timeseries|binary_other>
+> ORIGINAL: 90_原始文件镜像/<原始子目录>/<basename>
 
 ## 字符校正 (Layer 2 audit)
 - "1F-FDG" → "18F-FDG" (line 5)
@@ -121,6 +135,8 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 
 ## 文档元数据 (Layer 2 写入)
 - type: <doc_type>
+- target_directory: <临床域桶/子桶>
+- modality: <text|image|structured|omics_raw|timeseries|binary_other>
 - date: <YYYY-MM-DD>
 - hospital: <name>
 - summary: <≤80字>
@@ -151,7 +167,7 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 ```json
 {
   "patient_curated_sources": [
-    {"path": "09_患者补充/manual_timeline.txt", "encoding": "utf-16-le", "confidence": "low"}
+    {"path": "14_患者自管补充/患者补充/manual_timeline.txt", "encoding": "utf-16-le", "confidence": "low"}
   ],
   "duplicate_count": 3
 }
@@ -210,7 +226,7 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 ## 11. 开放问题（已锁定）
 
 1. **patient_code 命名**: ✅ `PT-<hex>` 默认 + `--alias` 可选覆盖
-2. **Layer 3.5 触发方式**: ✅ 自动检测（input 中包含 `*timeline*.txt` / `09_患者补充/` / `*manual*` / `*wechat*` 文件名时自动走 patient_curated 路径）
+2. **Layer 3.5 触发方式**: ✅ 自动检测（input 中包含 `*timeline*.txt` / `14_患者自管补充/` / `*manual*` / `*wechat*` 文件名时自动走 patient_curated 路径）
 3. **去重粒度**: ✅ byte-level SHA256 — v2.0 简单优先；后续考虑 perceptual hash
 4. **v1 用户迁移**: ✅ v2 自动检测旧 patient_dir 自动升级（看到 v1 schema 标记自动 reorganize）
 5. **失败时回退**: ✅ skip + warning（写入 `readiness.warnings[]`）
@@ -273,7 +289,7 @@ Input (folder / .zip|.rar|.7z|.tar.gz / .pdf|.docx|.jpg|.png)
 - ✅ profile.json 字段数 ≥ 40（mtb-core 11 / v1 48）
 - ✅ timeline.md 行数 ≤ 30 但每行是临床事件不是文件名（v1 28 行 ✓ / mtb-core 60+ 行文件清单 ✗）
 - ✅ review_flags ≥ 8 项（v1 10 项 ✓ / mtb-core 0 项 ✗）
-- ✅ PII 在 OCR sidecar 全部 [REDACTED]，10_原始文件/原始未遮挡/ 保留明文（mtb-core ✓ / v1 ✗）
+- ✅ PII 在 OCR sidecar 全部 [REDACTED]，90_原始文件镜像/ 保留明文（mtb-core ✓ / v1 ✗）
 - ✅ 字符校正记录 ≥ 5 项（mtb-core ✓ / v1 ✗）
 - ✅ 5 项 ground-truth 治疗事件依然漏（确认材料缺失而非 pipeline 缺陷）
 - ✅ 处理时长 ≤ 35 min（mtb-core 27.9 min / v1 ~25 min）

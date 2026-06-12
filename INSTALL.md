@@ -109,9 +109,10 @@ $HOME/CancerDAO/patients/PT-<10-hex>/
 ├── timeline.md
 ├── readiness.json
 ├── case_text.md
-├── 01_当前状态/ ~ 11_诊断证明/
-├── 09_患者补充/   # 仅当输入含手写 timeline / 微信导出
-├── 10_原始文件/原始未遮挡/
+├── 01_身份与基础信息/ ~ 14_患者自管补充/   # 14 临床域 (scheme_version 3)
+├── 14_患者自管补充/   # 仅当输入含手写 timeline / 微信导出
+├── 90_原始文件镜像/   # HIDDEN 字节级镜像（保留原始子目录）
+├── longitudinal_observations.json  # 纵向流观测值 (timeseries / 趋势 structured)
 └── ocr/<basename>.md  # 每个图片一份 sidecar
 ```
 
@@ -167,7 +168,7 @@ A: 印刷体 95%+，手写体 60-75%。本 skill 对手写自动 fallback Claude
 
 **Q: PII 脱敏漏检了怎么办？**
 
-A: Layer 1 NER + regex 双层后还有 Layer 2 vision 复查，三层 miss 是小概率。`10_原始文件/原始未遮挡/` 永远本地 only，不要 commit / 上传任何外部系统。
+A: Layer 1 NER + regex 双层后还有 Layer 2 vision 复查，三层 miss 是小概率。`90_原始文件镜像/` 永远本地 only，不要 commit / 上传任何外部系统。
 
 **Q: 这个仓和主仓 schema 不同步了怎么办？**
 

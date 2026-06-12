@@ -1,6 +1,6 @@
 ---
 name: cancer-buddy-organize-local
-description: Use when the user provides a folder / archive / single doc of cancer patient medical records (PDF / JPG / PNG / DOCX / .zip) and asks to organize / 整理病历 / 整理报告 / 整理这堆检查单, AND wants local PaddleOCR + NER PII redaction instead of cloud Claude vision. Or when any cancer-buddy / vmtb sub-skill detects missing profile.json / readiness.json on a privacy-sensitive install. Produces canonical patients/<patient_code>/ with profile.json (schema_v1, 48 fields), timeline.md (clinical events), readiness.json (8 domains + review_flags), case_text.md, 11-bucket sub-categorized files, OCR sidecars with PII double-redaction + character corrections, and patient_curated diary merge. Drop-in replacement for cancer-buddy-organize — same output schema, harder-OCR privacy floor, requires local Python + PaddleOCR venv.
+description: Use when the user provides a folder / archive / single doc of cancer patient medical records (PDF / JPG / PNG / DOCX / .zip) and asks to organize / 整理病历 / 整理报告 / 整理这堆检查单, AND wants local PaddleOCR + NER PII redaction instead of cloud Claude vision. Or when any cancer-buddy / vmtb sub-skill detects missing profile.json / readiness.json on a privacy-sensitive install. Produces canonical patients/<patient_code>/ with profile.json (schema_v1, 48 fields), timeline.md (clinical events), readiness.json (8 domains + review_flags), case_text.md, files sub-categorized into the scheme_version-3 taxonomy of 14 clinical domains (+2 infra), OCR sidecars with PII double-redaction + character corrections + a modality tag, and patient_curated diary merge. Drop-in replacement for cancer-buddy-organize — same output schema, harder-OCR privacy floor, requires local Python + PaddleOCR venv.
 ---
 
 # cancer-buddy-organize-local
@@ -15,7 +15,7 @@ Turn raw patient files into a canonical patient directory with **clinical-grade 
 
 ```
 Layer 1: 本地 PaddleOCR → ocr/<basename>.md (字符 + 双层 PII 脱敏)
-Layer 2: Claude vision  → 11 桶 + 子桶分类 + 去重 + 字符校正补救
+Layer 2: Claude vision  → 14 临床域 (+2 infra) + 子桶分类 + modality 标签 + 去重 + 字符校正补救
                        + 复制时保留原始 basename（命名不在 Layer 2 做）
 Layer 2.5: 你 (LLM) 判断  → 每文件 {date, doc_type, 机构, page}
                        + 患者级 {cancer_label, first_dx_date}
@@ -24,7 +24,7 @@ Layer 2.6: bash 机械执行  → 原子 mv + 冲突后缀 + manifest / sidecar 
                        / _FILENAME_MAPPING 全量回填
                        + patient_dir → <cancer>_<YYYY-MM>_<hash4>
 Layer 3: Claude text    → profile.json (schema_v1) + timeline.md (临床事件) + 6 类 review_flags
-Layer 3.5: 患者补充 merge → 09_患者补充/ 进 patient_curated 标签
+Layer 3.5: 患者补充 merge → 14_患者自管补充/ 进 patient_curated 标签
 ```
 
 Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-schema.md`](../../references/patient-profile-schema.md). Schema is shared with vmtb-skill / cancer-buddy-mtb-lite / cancer-buddy-trial-match.
@@ -58,11 +58,12 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 - `timeline.md` (≤30 行临床事件流，**不是文件清单**)
 - `readiness.json` (8 域评分 + blocking_gaps + review_flags)
 - `review_flags.md` (review_flags 非空时自动渲染 — 🔴/🟡/🟢 三级)
-- `case_text.md` (整合叙事，按基本信息→当前状态→诊断分期→病理→影像→分子→治疗→检验→手术→会诊顺序)
-- `01_当前状态/` ~ `11_诊断证明/` (11 桶 + 子桶细分原件)
-- `09_患者补充/` (manual_timeline / wechat / voice_transcripts / handwritten — local-variant exclusive)
-- `10_原始文件/原始未遮挡/` (字节级镜像，PII 未脱敏，仅本地审计)
-- `10_原始文件/_duplicates/` (SHA256 去重副本)
+- `case_text.md` (整合叙事，按身份基础信息→既往史家族史→病程文书→诊断分期→影像→分子组学→检验→治疗→手术操作→随访→会诊顺序)
+- `01_身份与基础信息/` ~ `14_患者自管补充/` (14 临床域 + 子桶细分原件；见 [`references/bucket-taxonomy.md`](references/bucket-taxonomy.md) §1)
+- `14_患者自管补充/` (患者补充 / 日记 / 自测 / conversation_notes — local-variant exclusive)
+- `90_原始文件镜像/` (HIDDEN 字节级镜像，保留原始子目录，PII 未脱敏，仅本地审计)
+- `90_原始文件镜像/_duplicates/` (SHA256 去重副本)
+- `longitudinal_observations.json` (纵向流观测值；timeseries / 趋势 structured 源，见 bucket-taxonomy.md §3)
 - `ocr/<basename>.md` (每文件一个，含 SOURCE/CONFIDENCE/字符校正/PII 二次脱敏/正文润色版)
 
 完整布局见 [SPEC.md §4](SPEC.md)。
@@ -72,7 +73,7 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 ### Step 0 — Pre-flight
 
 1. 解析 `input_path`，确认存在，向用户复述："我要整理 `<path>` (检测到 N 个文件 / 1 个 .zip / ...)"
-2. 自动检测 09_患者补充/ 触发条件（见 [`references/subbucket-mapping.md`](references/subbucket-mapping.md) §3）：
+2. 自动检测 14_患者自管补充/ 触发条件（见 [`references/subbucket-mapping.md`](references/subbucket-mapping.md) §3）：
    - 文件名匹配 `*timeline*.txt` / `*整理*.txt` / `*manual*` → Layer 3.5 模式
    - 否则 Layer 1-3 全 pipeline 模式
 3. 检测 PaddleOCR 可用性（见 [`references/paddleocr-integration.md`](references/paddleocr-integration.md) §自检命令）：
@@ -159,7 +160,7 @@ Subagent 跑完返回 pure JSON：
 
 ## 从默认 organize 原地升级
 
-如 `<patient_data_root>/<patient_code>/` 已存在且检测到默认 organize schema（无 `09_患者补充/` 子桶 / 无 `02_诊断与分期/病理报告/` 子桶 / OCR sidecar 缺 SOURCE 标签），询问用户是否原地升级：
+如 `<patient_data_root>/<patient_code>/` 已存在且检测到旧 schema（无 `14_患者自管补充/` 子桶 / 无 `04_诊断与分期/病理报告/` 子桶 / OCR sidecar 缺 SOURCE 或 MODALITY 标签 / 存在已废弃的 `01_当前状态` `10_原始文件` 等旧前缀），询问用户是否原地升级：
 
 - **是** → mode=`default_upgrade`，subagent 重新跑 Layer 1-3，原文件移到 `_default_archive_<timestamp>/` 备份
 - **否** → 走默认 patient_code 碰撞规则，追加 `_local`/`_local2`/...
@@ -167,8 +168,8 @@ Subagent 跑完返回 pure JSON：
 ## 与默认 `cancer-buddy-organize` 的关键差异（用户视角）
 
 - ✅ 新增：本地 PaddleOCR 字符级 OCR + 双层 PII 脱敏（默认版本是 Claude vision 黑盒）
-- ✅ 新增：09_患者补充/ 通道 — 患者手写 timeline / 微信 / 语音转录 也能合并
-- ✅ 新增：04/05/06 桶下子桶细分（默认是桶级平铺）
+- ✅ 新增：14_患者自管补充/ 通道 — 患者手写 timeline / 微信 / 语音转录 也能合并
+- ✅ 新增：05_影像 / 06_分子与组学 / 07_检验 / 08_治疗 等桶下子桶细分（默认是桶级平铺）
 - ✅ 新增：SHA256 文件去重（默认可能让同一份 MRI 进 2 次）
 - ✅ 新增：review_flags 第 6 类 `patient_curated_vs_formal`
 - ✅ 新增：英文文档 fallback Claude vision（PaddleOCR 中文模型对英文准确度差）
@@ -190,7 +191,7 @@ Subagent 跑完返回 pure JSON：
 
 - 本 skill 不做临床判断 / 治疗建议 / MTB 评估 — 这些由下游 sub-skill 处理
 - 永不**捏造**字段：unreadable → `null` (JSON) 或 `[OCR_UNCERTAIN]` (text)
-- `10_原始文件/原始未遮挡/` 是字节级镜像 — 永远本地 only，下游 skill 永远只读脱敏版
+- `90_原始文件镜像/` 是 HIDDEN 字节级镜像 — 永远本地 only，永不患者可见 / 永不锚定，下游 skill 永远只读脱敏版
 - 字符校正只能改 OCR 错字，**禁止**做语义改写（"病理示鳞癌" → "病理示宫颈鳞癌" 这是创造内容）
 - review_flags 非空且含 🔴 → 必须 block 用户进下游 skill 之前明确逐项确认
 
@@ -205,7 +206,7 @@ Subagent 跑完返回 pure JSON：
 - ✅ profile.json 字段数 ≥ 40
 - ✅ timeline.md ≤ 30 行 + 每行临床事件
 - ✅ review_flags ≥ 8 项（含 patient_curated_vs_formal 至少 1）
-- ✅ PII 全部 [REDACTED] in OCR sidecar；明文仅在 10_原始文件/原始未遮挡/
+- ✅ PII 全部 [REDACTED] in OCR sidecar；明文仅在 90_原始文件镜像/
 - ✅ 字符校正记录 ≥ 5 项
 - ✅ 5 项 ground-truth 治疗事件（后装内照射 / 胸腺法新等）依然漏 — 确认材料缺失而非 pipeline 缺陷
 - ✅ 处理时长 ≤ 35 min
@@ -213,10 +214,13 @@ Subagent 跑完返回 pure JSON：
 ## References
 
 - [SPEC.md](SPEC.md) — 完整设计 + 决策 + 验收
-- [references/document-taxonomy.md](references/document-taxonomy.md) — 11 桶分类法
-- [references/subbucket-mapping.md](references/subbucket-mapping.md) — 子桶 + 09_患者补充检测
+- [references/bucket-taxonomy.md](references/bucket-taxonomy.md) — **权威** scheme_version 3 定义（14 临床域 + 2 infra + modality + 纵向流）
+- [references/ingest-adapters.md](references/ingest-adapters.md) — 按 modality 的 ingest 适配器（omics_raw / timeseries / binary_other）
+- [references/document-taxonomy.md](references/document-taxonomy.md) — 文档类型 → 临床域 对照表
+- [references/subbucket-mapping.md](references/subbucket-mapping.md) — 子桶 + 14_患者自管补充检测
 - [references/ocr-sidecar-template.md](references/ocr-sidecar-template.md) — Layer 1+2 sidecar schema
 - [references/review-flags-categories.md](references/review-flags-categories.md) — 6 类审计规则
+- [references/schemas/longitudinal_observations.schema.json](references/schemas/longitudinal_observations.schema.json) — 纵向流观测值 store schema
 - [references/paddleocr-integration.md](references/paddleocr-integration.md) — subprocess + venv + fallback
 - [references/organizer-prompt.md](references/organizer-prompt.md) — subagent 主提示词（含 Layer 2.5/2.6 canonical 命名）
 - [../../references/profile-card.md](../../references/profile-card.md) — Patient Profile Card 模板（与 cancer-buddy-organize 共享）

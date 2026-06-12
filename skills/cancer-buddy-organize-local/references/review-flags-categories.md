@@ -13,7 +13,7 @@
 | 3 | `clinical_logic_anomaly` | 术语用错语境 / 逻辑不自洽 | red 或 yellow |
 | 4 | `unverified_critical_field` | 下游 eligibility 关键字段仅来自 progress note，无原件 | red |
 | 5 | `value_trend_anomaly` | 数值时序变化非生理性，源文档无解释 | yellow |
-| 6 | `patient_curated_vs_formal` | 09_患者补充/ 内容与正式文档冲突 ★ v2 新增 | yellow |
+| 6 | `patient_curated_vs_formal` | 14_患者自管补充/ 内容与正式文档冲突 | yellow |
 
 ## Severity 校准
 
@@ -103,9 +103,9 @@
 
 **典型**：irAE 甲状腺炎破坏期 TSH 暴跌是合理的 → **不触发**（因为有 irAE 解释）；但**临床决策记录缺失**（无医嘱调整）应**另触发** category 3 (clinical_logic_anomaly)。
 
-### 6. `patient_curated_vs_formal` ★ v2 新增
+### 6. `patient_curated_vs_formal`
 
-**触发条件**：09_患者补充/ 下的内容（manual timeline / 微信 / 语音转录）与 02-08 / 11 正式文档冲突。
+**触发条件**：14_患者自管补充/ 下的内容（manual timeline / 微信 / 语音转录）与 01–13 正式文档冲突。
 
 | 冲突类型 | 例 | severity |
 |---|---|---|
@@ -127,7 +127,7 @@
   "current_value": "rpT4aN2aM1 IV期",
   "issue": "AJCC 8th 前缀只有 c/p/yp/r/a, 'rp' 不在其中",
   "source_evidence": [                          // 必填; 至少 1 条
-    "10_原始文件/出院诊断证明_2024-07-05.jpg"
+    "04_诊断与分期/诊断证明/出院诊断证明_2024-07-05.jpg"
   ],
   "suggested_value": "pT4aN2aM1 IV期",
   "suggested_action": "改写为 p 前缀; 在 data_sources 注明医院原写法",
