@@ -19,7 +19,7 @@ def extract_docx(file_path: Path) -> dict:
     try:
         from docx import Document
     except ImportError:
-        return {"success": False, "error": "python-docx not installed. Run: uv pip install python-docx"}
+        return {"success": False, "error": "python-docx not installed. Run: pip install -r requirements-extract.txt (see INSTALL.md)"}
 
     doc = Document(str(file_path))
     parts = []

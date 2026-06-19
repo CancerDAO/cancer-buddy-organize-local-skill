@@ -1,0 +1,7 @@
+# Layer 1 文档文本提取依赖 (PDF / DOCX / XLSX)
+# 装入 PaddleOCR venv (默认 ~/.venvs/mtb-ocr):
+#   ~/.venvs/mtb-ocr/bin/pip install -r requirements-extract.txt
+# 这些是 extract_pdf.py / extract_docx.py / extract_excel.py 的运行时依赖。
+pdfplumber>=0.11.0
+python-docx>=1.1.0
+openpyxl>=3.1.0

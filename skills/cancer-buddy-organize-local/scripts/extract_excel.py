@@ -19,7 +19,7 @@ def extract_xlsx(file_path: Path) -> dict:
     try:
         import openpyxl
     except ImportError:
-        return {"success": False, "error": "openpyxl not installed. Run: uv pip install openpyxl"}
+        return {"success": False, "error": "openpyxl not installed. Run: pip install -r requirements-extract.txt (see INSTALL.md)"}
 
     wb = openpyxl.load_workbook(str(file_path), data_only=True)
     sheet_names = wb.sheetnames

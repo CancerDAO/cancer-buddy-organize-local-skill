@@ -10,7 +10,7 @@
 | `extract_pdf.py` | PDF 文本提取 (PyMuPDF, 内置 OCR fallback) | Step 3.2 (pdf) |
 | `extract_docx.py` | DOCX 文本提取 (python-docx) | Step 3.3 (docx) |
 | `extract_excel.py` | XLSX 文本 + 表格提取 (openpyxl) | Step 3.3 (xlsx) |
-| `unpack_archive.py` | zip/rar/7z/tar.gz 解压 + 非 ASCII 文件名 flatten | Step 2.1 (archives) |
+| `unpack_archive.py` | zip/tar/tar.gz/tgz/tar.bz2/tar.xz/rar/7z 解压 + 非 ASCII 文件名 flatten | Step 2.1 (archives) |
 
 ## 调用契约
 
@@ -28,6 +28,8 @@
 - `openpyxl>=3.1`
 - `rarfile` (可选, 解 .rar)
 - `py7zr` (可选, 解 .7z)
+
+PDF/DOCX/XLSX 文本提取依赖固定在仓库根 `requirements-extract.txt`（`pdfplumber` / `python-docx` / `openpyxl`），详见 `../../../INSTALL.md` §2.3.1。`.tar*` 变体走 Python 标准库 `tarfile`，无需额外安装；`.7z` 需系统 `7z`，`.rar` 需 `unrar`/`unar`（INSTALL.md §2.3.2）。
 
 详见 `../references/paddleocr-integration.md` §依赖检查.
 

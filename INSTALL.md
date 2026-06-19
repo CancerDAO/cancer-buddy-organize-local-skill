@@ -112,6 +112,25 @@ pip install \
   "typing-extensions==4.12.2"
 ```
 
+#### 2.3.1 文档提取依赖 (PDF / DOCX / XLSX)
+
+Layer 1 从 PDF / DOCX / XLSX 直接抽取文本时需要 `pdfplumber` / `python-docx` / `openpyxl`。这些固定在仓库根的 `requirements-extract.txt`：
+
+```bash
+# 装入同一个 PaddleOCR venv
+~/.venvs/mtb-ocr/bin/pip install -r requirements-extract.txt
+```
+
+缺这几个包时 `extract_pdf.py` / `extract_docx.py` / `extract_excel.py` 会返回 `{"success": false, "error": "... Run: pip install -r requirements-extract.txt (see INSTALL.md)"}`，按提示装上即可。
+
+#### 2.3.2 压缩包解压的系统工具
+
+`unpack_archive.py` 支持 `.zip` / `.tar` / `.tar.gz` / `.tgz` / `.tar.bz2` / `.tbz2` / `.tar.xz` / `.txz` / `.rar` / `.7z`：
+
+- **`.zip` 和所有 `.tar*` 变体**：用 Python 标准库（`zipfile` / `tarfile`），无需额外安装。
+- **`.7z`**：需要系统 `7z`（p7zip）。macOS：`brew install p7zip`；Debian/Ubuntu：`apt install p7zip-full`。
+- **`.rar`**：需要系统 `unrar` 或 `unar`（脚本通过 subprocess 调用）。macOS：`brew install unar`；Debian/Ubuntu：`apt install unar`（或 `unrar`）。
+
 ### 2.4 自检
 
 ```bash
