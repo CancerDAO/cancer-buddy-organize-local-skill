@@ -48,6 +48,7 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 - `input_path` (必填)：folder / .zip / .rar / .7z / .tar.gz / .pdf / .docx 绝对路径
 - `--alias <name>` (可选)：覆盖默认 `PT-<hex>` patient_code（例 `--alias 程女士-2026`）。**v2.1 警告**：`--alias` 包含真名时调用方必须主动告知用户："patient_code 会出现在所有路径 / 下游报告 / 文件系统 — 用真名意味着 PII 直接暴露在文件系统层"。生产数据建议一律 `PT-<hex>`，仅 demo / 教学 / 单人本地审阅场景才用真名 alias。
 - `--merge-into <patient_code>` (可选, 显式触发 Layer 3.5)：把 input 内容作为补充材料 merge 进已有 patient_dir
+- `--curated-text <text>` (可选, 与 `input_path` 二选一)：把已经由档案所有者审核确认的短文本作为 `patient_curated` 增量写入已有 patient_dir。必须同时提供 `--merge-into`；跳过 OCR、文件分类、全量 Layer 3 综合和总结生成，详见 [`references/curated-text-mode.md`](references/curated-text-mode.md)。
 - `--allow-cloud-vision` (可选)：本地 PaddleOCR 失败时，允许 fallback 到当前 runtime 的多模态 vision 读原图。**默认关闭（fail-safe）**——默认行为是 OCR 失败即记 gap、文件进 `未分类/`、**绝不上云**。仅在单人本地审阅、且操作者明确接受"原始病历会发给模型 provider（Claude Code→Anthropic / Codex→OpenAI）"时才开。服务器 / 隐私优先部署**永不**开此 flag。
 
 ## Supported runtimes
@@ -85,7 +86,7 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 ### Step 0 — Pre-flight
 
 1. 解析 `input_path`，确认存在，向用户复述："我要整理 `<path>` (检测到 N 个文件 / 1 个 .zip / ...)"
-2. 自动检测 09_患者补充/ 触发条件（见 [`references/subbucket-mapping.md`](references/subbucket-mapping.md) §3）：
+2. `--curated-text` 存在时直接设 mode=`curated_text`，按 [`references/curated-text-mode.md`](references/curated-text-mode.md) 执行；不得先包装成 `.txt` 再进入 full pipeline。否则自动检测 09_患者补充/ 触发条件（见 [`references/subbucket-mapping.md`](references/subbucket-mapping.md) §3）：
    - 文件名匹配 `*timeline*.txt` / `*整理*.txt` / `*manual*` → Layer 3.5 模式
    - 否则 Layer 1-3 全 pipeline 模式
 3. 检测 PaddleOCR 可用性（见 [`references/paddleocr-integration.md`](references/paddleocr-integration.md) §自检命令）：
@@ -102,7 +103,8 @@ Final artifact root: `<patient_dir>/` per [`../../references/patient-profile-sch
 - input_path: <absolute path>
 - patient_code: <PT-hex or alias>
 - patient_data_root: <resolved>
-- mode: <full | merge_only | default_upgrade>
+- mode: <full | merge_only | default_upgrade | curated_text>
+- curated_text: <owner-reviewed short text; required only for curated_text>
 - paddle_python: <~/.venvs/mtb-ocr/bin/python or "fallback">
 - cloud_vision_fallback: <deny | allow>   # 默认 deny；服务器/隐私优先部署必须 deny（OCR 失败不上云）
 - runtime: <claude-code | codex-gpt-5.5 | ...>
@@ -235,6 +237,7 @@ Subagent 跑完返回 pure JSON：
 - [references/review-flags-categories.md](references/review-flags-categories.md) — 6 类审计规则
 - [references/paddleocr-integration.md](references/paddleocr-integration.md) — subprocess + venv + fallback
 - [references/organizer-prompt.md](references/organizer-prompt.md) — subagent 主提示词（含 Layer 2.5/2.6 canonical 命名）
+- [references/curated-text-mode.md](references/curated-text-mode.md) — 已审核短文本的轻量 patient_curated 增量契约
 - [../../references/profile-card.md](../../references/profile-card.md) — Patient Profile Card 模板（与 cancer-buddy-organize 共享）
 - [../../references/patient-profile-schema.md](../../references/patient-profile-schema.md) — schema_v1 contract（与 cancer-buddy-skill 主仓双向同步）
 - [../../references/safety-guardrails.md](../../references/safety-guardrails.md) — 安全红线（与 cancer-buddy-skill 主仓双向同步）

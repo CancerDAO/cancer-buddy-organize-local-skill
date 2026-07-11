@@ -12,6 +12,7 @@ Turn raw patient files (folder / archive / single doc) into a canonical patient 
 - profile.json / timeline.md / readiness.json **临床事件级**而非文件清单级
 - 输出 schema 与 vmtb-skill / cancer-buddy-mtb-lite / cancer-buddy-trial-match 完全互通
 - 支持患者补充材料（手写日记 / 微信 / 医生口述）作为 patient_curated 第二轮 merge
+- 支持档案所有者已审核的短文本走 `curated_text` 轻量增量：不做 OCR、不重跑全量综合、不重生总结
 
 **不做**：临床判断、治疗建议、MTB 报告 — 这些由下游 skill 处理。
 
